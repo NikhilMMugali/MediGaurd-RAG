@@ -1,19 +1,21 @@
 # MediGaurd RAG — Data Flow
 
-## PDF ingestion pipeline (full target, Phase 1 implements steps 1–3)
+> **Implementation status (Phase 2, 2026-10-08):** steps 1–10 below are implemented (`backend/app/api/upload.py`, `backend/app/ingestion/pdf_mapper.py`). Step 7's "structured info extraction" is currently a rule-based "Label: Value" line parser, not an LLM call — see progress/DECISIONS.md. Steps 11–14 (chunking beyond the schema-aware knowledge records already generated for Synthea data, embedding, Qdrant) are Phase 3.
+
+## PDF ingestion pipeline
 
 ```text
 1. UPLOAD                multipart POST, role-gated (DOCTOR/NURSE/ADMIN)
 2. FILE VALIDATION       content-type/extension check, size limit        [implemented]
-3. HASH / DUPLICATE CHECK  sha256 of file bytes against source_documents [extractor computes hash now; dedup check is Phase 2]
+3. HASH / DUPLICATE CHECK  sha256 of file bytes against source_documents [implemented — duplicate file hash rejected with 409]
 4. PDF TEXT EXTRACTION   PyMuPDF per-page text; pdfplumber for tables    [implemented]
 5. PAGE PRESERVATION    page_number kept on every extracted unit         [implemented]
-6. SECTION/TABLE DETECTION  heading/table detection                      [Phase 2]
-7. STRUCTURED INFO EXTRACTION  LLM/rule-based entity extraction          [Phase 2]
-8. SCHEMA MAPPING        map to patients/conditions/medications/...      [Phase 2]
-9. VALIDATION            Pydantic models reject malformed/hallucinated fields [Phase 2]
-10. DATABASE INSERTION   insert/merge rows, stamped with provenance      [Phase 2]
-11. SCHEMA-AWARE KNOWLEDGE GENERATION  atomic + narrative chunks          [Phase 3]
+6. SECTION/TABLE DETECTION  heading/table detection                      [not yet — current parser matches "Label: Value" lines directly, see progress/DECISIONS.md]
+7. STRUCTURED INFO EXTRACTION  rule-based "Label: Value" line parser     [implemented — app/ingestion/pdf_mapper.py::extract_patient_document_data]
+8. SCHEMA MAPPING        map to patients/conditions/medications/allergies/procedures/encounters/claims [implemented — app/ingestion/pdf_mapper.py::map_to_database]
+9. VALIDATION            Pydantic intermediate schema (app/schemas/pdf_normalization.py) [implemented]
+10. DATABASE INSERTION   insert rows, stamped with source_type=UPLOADED_PDF + source_document_id [implemented; new-patient dedup via external_patient_id/name]
+11. SCHEMA-AWARE KNOWLEDGE GENERATION  atomic + narrative chunks          [implemented for Synthea data (176,054 knowledge_records via scripts/generate_knowledge_records.py); not yet wired for uploaded-PDF rows — Phase 3]
 12. EMBEDDING            EmbeddingProvider                                [Phase 3]
 13. QDRANT UPSERT        chunk + full security metadata payload          [Phase 3]
 14. READY FOR RAG        immediately queryable                           [Phase 3]

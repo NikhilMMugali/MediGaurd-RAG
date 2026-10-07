@@ -20,3 +20,5 @@ data/synthea/*.zip
 htmlcov/
 qdrant_storage/
 postgres_data/
+*.db
+*.db-journal

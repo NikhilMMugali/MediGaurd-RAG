@@ -57,16 +57,22 @@ pip install -r backend/requirements.txt
 cp .env.example .env   # fill in real secrets/API keys locally, never commit .env
 ```
 
-### Database (Phase 2+)
+### Database
 
 ```bash
-docker compose up -d postgres qdrant
-python scripts/seed_users.py   # creates demo users against the configured DATABASE_URL
+docker compose up -d postgres qdrant   # or point DATABASE_URL at any PostgreSQL instance
+alembic -c backend/alembic.ini upgrade head
+python scripts/seed_users.py
+python scripts/import_synthea.py
+python scripts/seed_authorization_data.py
+python scripts/generate_knowledge_records.py
 ```
+
+Each script is idempotent — safe to re-run. **Current local dev state:** PostgreSQL/Docker were unavailable on the build machine, so local verification ran against SQLite (`DATABASE_URL=sqlite:///...` in `.env`); the schema is plain SQLAlchemy with no Postgres-specific types, so switching `DATABASE_URL` to a real PostgreSQL instance needs no code changes — see [progress/DECISIONS.md](progress/DECISIONS.md).
 
 ### Synthea import
 
-The dataset is already extracted at `data/synthea/` (18 CSVs; not committed — see `.gitignore`). The importer (`scripts/import_synthea.py`) is Phase 2 work — see [progress/TODO.md](progress/TODO.md).
+The dataset is already extracted at `data/synthea/` (18 CSVs; not committed — see `.gitignore`). `scripts/import_synthea.py` imports all 18 files in dependency order and reports row counts, which should match the inventory in [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md) exactly.
 
 ### Run the backend
 

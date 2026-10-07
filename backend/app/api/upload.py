@@ -1,11 +1,16 @@
-import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from sqlalchemy.orm import Session
 
 from app.auth.deps import require_roles
 from app.config import get_settings
+from app.db.session import get_db
 from app.ingestion.pdf_extractor import PdfExtractionError, extract_pdf
-from app.models.user import RoleEnum
+from app.ingestion.pdf_mapper import extract_patient_document_data, map_to_database
+from app.models.documents import IngestionJob, SourceDocument
+from app.models.provenance import new_uuid
+from app.models.user import RoleEnum, User
 from app.schemas.ingestion import UploadResponse
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -15,7 +20,8 @@ settings = get_settings()
 @router.post("/upload", response_model=UploadResponse)
 async def upload_document(
     file: UploadFile,
-    _user=Depends(require_roles(RoleEnum.DOCTOR, RoleEnum.NURSE, RoleEnum.ADMIN)),
+    user: User = Depends(require_roles(RoleEnum.DOCTOR, RoleEnum.NURSE, RoleEnum.ADMIN)),
+    db: Session = Depends(get_db),
 ) -> UploadResponse:
     if file.content_type != "application/pdf" and not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are supported.")
@@ -34,13 +40,53 @@ async def upload_document(
     except PdfExtractionError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
-    # Phase 1 scope: validate and extract only. Schema mapping, database
-    # insertion, chunking, embedding and vector indexing are implemented in
-    # Phase 2 (ingestion pipeline) and Phase 3 (RAG indexing).
-    return UploadResponse(
-        document_id=str(uuid.uuid4()),
+    existing = db.query(SourceDocument).filter(SourceDocument.file_hash == result.file_hash).first()
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This file was already uploaded as document {existing.id} ({existing.status}).",
+        )
+
+    document = SourceDocument(
+        id=new_uuid(),
         file_name=result.file_name,
-        status="EXTRACTED",
+        file_hash=result.file_hash,
+        source_type="UPLOADED_PDF",
+        uploaded_by=user.id,
+        status="EXTRACTING",
+    )
+    db.add(document)
+    db.flush()
+
+    job = IngestionJob(id=new_uuid(), source_document_id=document.id, status="EXTRACTING", started_at=datetime.utcnow())
+    db.add(job)
+    db.flush()
+
+    # Phase 2 scope: rule-based section mapping into the canonical schema.
+    # Chunking, embedding and Qdrant indexing are Phase 3.
+    job.status = "MAPPING"
+    normalized = extract_patient_document_data(result)
+
+    try:
+        records_created = map_to_database(db, normalized, document.id)
+    except Exception as exc:  # defend against a malformed mapping, not a reason to lose the upload
+        job.status = "FAILED"
+        job.error_message = str(exc)
+        job.completed_at = datetime.utcnow()
+        document.status = "FAILED"
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Could not map PDF content to the database schema.") from exc
+
+    job.status = "COMPLETED"
+    job.records_created = records_created
+    job.completed_at = datetime.utcnow()
+    document.status = "COMPLETED"
+    db.commit()
+
+    return UploadResponse(
+        document_id=document.id,
+        file_name=result.file_name,
+        status="COMPLETED",
         page_count=result.page_count,
-        message="PDF text extracted successfully. Schema mapping and indexing are not yet wired up (Phase 2/3).",
+        message=f"Extracted {result.page_count} page(s); mapped {records_created} structured record(s) into the database.",
     )

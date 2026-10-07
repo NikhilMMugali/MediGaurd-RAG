@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
+import app.models  # noqa: E402,F401  (registers all tables on Base.metadata)
 from app.auth.security import hash_password  # noqa: E402
 from app.db.session import Base, SessionLocal, engine  # noqa: E402
 from app.models.user import Department, RoleEnum, User  # noqa: E402
