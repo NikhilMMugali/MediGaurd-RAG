@@ -1,12 +1,17 @@
 # MediGaurd RAG — TODO
 
 ## Immediate
-- [ ] Verify `scripts/index_knowledge.py` finished and the Qdrant collection count matches `knowledge_records` count; run the acceptance-test questions live over HTTP against real Synthea data
-- [ ] Push to https://github.com/NikhilMMugali/MediGaurd-RAG.git — blocked on credentials (no `gh` CLI, SSH key, or stored HTTPS creds on this machine); user chose to skip for now
-- [ ] Get a real PostgreSQL running locally (brew build was still compiling last checked, or install Docker) and re-point `DATABASE_URL`; re-run migrations/import/seed/knowledge-gen/indexing against it
+- [x] Verify `scripts/index_knowledge.py` finished — 176,054/176,054 indexed — and live-tested doctor vs finance on the same patient/question over real HTTP
+- [ ] Push to https://github.com/NikhilMMugali/MediGaurd-RAG.git — two tokens tried so far both got 403 (permission denied); needs a token with `repo` scope (classic) or explicit repo + Contents:Read-and-write (fine-grained)
+- [ ] Switch to real PostgreSQL — brew finished installing postgresql@16; not yet migrated over (still on SQLite)
+- [ ] Manual browser click-through of the frontend before the jury demo (no browser automation tool was available this session; verified via production build + dev-server transform + direct API/CORS checks instead)
+
+## Frontend — remaining
+- [ ] Admin retrieval-debug panel UI (backend already returns the `debug` block to ADMIN on `/api/rag/query` — just needs an expandable "Retrieval Details" section)
+- [ ] Live ingestion status polling in the upload dialog (backend has RECEIVED→EXTRACTING→MAPPING→...→COMPLETED states on `ingestion_jobs`; dialog currently just shows the final result)
+- [ ] A relevance score threshold on retrieval so an authorized-but-irrelevant top chunk doesn't get returned as if it answered the question (see Known Issues in PROGRESS.md)
 
 ## Phase 3 — remaining
-- [ ] Frontend: login page, dashboard/chat, upload UI with ingestion progress, admin debug view (the API already returns the debug block to ADMIN on `/api/rag/query` — there's just no page for it yet)
 - [ ] Optional reranking / hybrid lexical search (explicitly optional per spec — skip unless it demonstrably improves answers)
 - [ ] Extend `knowledge_generator.py` to cover allergies/procedures/careplans/immunizations/imaging/devices/payers (currently: conditions/medications/observations/encounters/claims/claim_transactions) and re-run `scripts/index_knowledge.py`
 - [ ] Query routing / domain classification (spec section 17) — not implemented; currently the authorization filter alone determines the retrievable set, semantic similarity determines relevance within it

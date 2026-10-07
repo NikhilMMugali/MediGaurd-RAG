@@ -4,9 +4,12 @@ question -> AuthorizationContext -> Qdrant filter -> embed -> filtered
 search -> ONLY authorized chunks -> context assembly -> LLM -> cited
 answer -> audit log.
 
-The function below is the one and only place that calls the vector store
-for a user query, so the retrieval-time authorization boundary lives in one
-spot: build_retrieval_filter() runs before search(), never after.
+retrieve_authorized_sources() is the one and only place that calls the
+vector store for a user query, so the retrieval-time authorization boundary
+lives in one spot: build_retrieval_filter() runs before search(), never
+after. Both run_query() (chat) and app.api.patients's status endpoint call
+this same function, rather than each reimplementing the authorization
+check — there is exactly one retrieval-authorization code path in the app.
 """
 import re
 from dataclasses import dataclass
@@ -51,6 +54,14 @@ class RagResult:
     debug: dict | None = None
 
 
+@dataclass
+class RetrievalOutcome:
+    status: str  # "OK" | "DENIED" | "NO_AUTHORIZED_CONTEXT"
+    sources: list[dict]
+    debug: dict
+    denial_answer: str | None = None
+
+
 def _detect_patient_id(question: str, explicit_patient_id: str | None) -> str | None:
     if explicit_patient_id:
         return explicit_patient_id
@@ -74,7 +85,9 @@ def _write_audit_log(db: Session, user: User, question: str, status: str, retrie
     db.commit()
 
 
-def run_query(db: Session, user: User, question: str, patient_id: str | None = None) -> RagResult:
+def retrieve_authorized_sources(
+    db: Session, user: User, question: str, patient_id: str | None = None, audit: bool = True
+) -> RetrievalOutcome:
     ctx = build_authorization_context(db, user)
     debug: dict = {
         "role": ctx.role.value,
@@ -86,27 +99,27 @@ def run_query(db: Session, user: User, question: str, patient_id: str | None = N
     # A patient-scoped role (DOCTOR/NURSE) with zero assignments must never
     # fall through to an unfiltered search — deny before touching Qdrant.
     if ctx.assigned_patient_ids is not None and len(ctx.assigned_patient_ids) == 0:
-        _write_audit_log(db, user, question, "NO_AUTHORIZED_CONTEXT", [], "no patients assigned to this user")
-        return RagResult(
-            answer="You have no assigned patients, so there is no authorized clinical context to answer from.",
+        if audit:
+            _write_audit_log(db, user, question, "NO_AUTHORIZED_CONTEXT", [], "no patients assigned to this user")
+        return RetrievalOutcome(
             status="NO_AUTHORIZED_CONTEXT",
-            citations=[],
-            retrieved_count=0,
+            sources=[],
             debug=debug,
+            denial_answer="You have no assigned patients, so there is no authorized clinical context to answer from.",
         )
 
     detected_patient = _detect_patient_id(question, patient_id)
     if detected_patient and ctx.assigned_patient_ids is not None and detected_patient not in ctx.assigned_patient_ids:
         # Hard patient-level deny: never reaches Qdrant, so the restricted
         # patient's data is provably never retrieved, let alone shown to the LLM.
-        _write_audit_log(db, user, question, "DENIED", [], f"patient {detected_patient} not assigned to this user")
+        if audit:
+            _write_audit_log(db, user, question, "DENIED", [], f"patient {detected_patient} not assigned to this user")
         debug["detected_patient_id"] = detected_patient
-        return RagResult(
-            answer="That patient's information is restricted for your role.",
+        return RetrievalOutcome(
             status="DENIED",
-            citations=[],
-            retrieved_count=0,
+            sources=[],
             debug=debug,
+            denial_answer="That patient's information is restricted for your role.",
         )
 
     query_filter: Filter = build_retrieval_filter(ctx)
@@ -120,16 +133,29 @@ def run_query(db: Session, user: User, question: str, patient_id: str | None = N
     hits = store.search(vector, query_filter, settings.rag_top_k, settings.rag_score_threshold)
 
     if not hits:
-        _write_audit_log(db, user, question, "NO_AUTHORIZED_CONTEXT", [], "no authorized chunks matched the query")
-        return RagResult(
-            answer="I couldn't find enough authorized information to answer that question.",
+        if audit:
+            _write_audit_log(db, user, question, "NO_AUTHORIZED_CONTEXT", [], "no authorized chunks matched the query")
+        return RetrievalOutcome(
             status="NO_AUTHORIZED_CONTEXT",
-            citations=[],
-            retrieved_count=0,
+            sources=[],
             debug=debug,
+            denial_answer="I couldn't find enough authorized information to answer that question.",
         )
 
     sources = [hit.payload for hit in hits]
+    debug["retrieved_ids"] = [s["knowledge_record_id"] for s in sources]
+    return RetrievalOutcome(status="OK", sources=sources, debug=debug)
+
+
+def run_query(db: Session, user: User, question: str, patient_id: str | None = None) -> RagResult:
+    outcome = retrieve_authorized_sources(db, user, question, patient_id, audit=False)
+
+    if outcome.status != "OK":
+        reason = outcome.denial_answer or ""
+        _write_audit_log(db, user, question, outcome.status, [], reason)
+        return RagResult(answer=outcome.denial_answer or "", status=outcome.status, citations=[], retrieved_count=0, debug=outcome.debug)
+
+    sources = outcome.sources
     context_text = "\n\n".join(
         f"[SOURCE_{i+1}]\nType: {s['record_type']}\nPatient: {s.get('patient_id')}\nContent:\n{s['content']}"
         for i, s in enumerate(sources)
@@ -152,6 +178,5 @@ def run_query(db: Session, user: User, question: str, patient_id: str | None = N
 
     retrieved_ids = [s["knowledge_record_id"] for s in sources]
     _write_audit_log(db, user, question, "ANSWERED", retrieved_ids, None)
-    debug["retrieved_ids"] = retrieved_ids
 
-    return RagResult(answer=answer, status="ANSWERED", citations=citations, retrieved_count=len(hits), debug=debug)
+    return RagResult(answer=answer, status="ANSWERED", citations=citations, retrieved_count=len(sources), debug=outcome.debug)

@@ -51,6 +51,17 @@ Response `200`:
 
 Planned for Phase 2/3 (not yet implemented): schema mapping to structured tables, database insertion, chunking, embedding, Qdrant indexing — see [DATA_FLOW.md](DATA_FLOW.md).
 
+## Patients (added for the frontend — reuses existing authorization/RAG, no new security logic)
+
+### `GET /api/patients?limit=20&offset=0`
+Implemented — `backend/app/api/patients.py`. Returns only patient ids the current user is authorized to see, using the same `AuthorizationContext` the RAG pipeline uses. `scope` is `"assigned"` (DOCTOR/NURSE, from real `patient_assignments`) or `"all"` (paginated, for roles with no patient-level scoping).
+
+### `GET /api/patients/{patient_id}/status`
+Implemented. Calls the same `retrieve_authorized_sources()` the chat endpoint uses, then classifies deterministically: an authorized `condition` record found → `"Attention"`; none → `"Stable"`; retrieval denied or empty → `"No Recent Information"`. Never a second, independent "status AI."
+
+### `GET /api/patients/{patient_id}/summary`
+Implemented (Phase 2). Row counts only (conditions/medications/encounters) — no clinical content.
+
 ## Health
 
 ### `GET /health`

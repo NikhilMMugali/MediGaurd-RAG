@@ -1,77 +1,69 @@
 # MediGaurd RAG Progress
 
 ## Current Phase
-Phase 3 — Secure RAG (backend core implemented; UI/frontend not yet started)
+Frontend (core flows implemented) — backend Phases 1-3 complete and verified live against the full real dataset
 
 ## Overall Status
 IN PROGRESS
 
 ## Phase 1 — Backend
-- [x] Project scaffold
-- [x] FastAPI
-- [x] Configuration
-- [x] Authentication
-- [x] Password hashing
-- [x] Role validation (server-side role must match client-selected role)
-- [x] User APIs (`/api/auth/login`, `/api/auth/me`)
-- [x] PDF upload API
-- [x] PDF extraction (PyMuPDF)
-- [x] Backend tests (9 passing)
+Complete. See git history / docs for detail. 9 tests.
 
 ## Phase 2 — Database
-- [x] PostgreSQL-compatible schema (SQLAlchemy, dialect-agnostic; running on SQLite locally — see Known Issues)
-- [x] All 18 Synthea tables + application/authorization/provenance tables (29 total)
-- [x] Alembic migrations (initial migration generated and verified against a blank DB)
-- [x] Synthea import (`scripts/import_synthea.py`) — idempotent, row counts verified exact
-- [x] Authorization tables seeded (`scripts/seed_authorization_data.py`)
-- [x] PDF normalization foundation wired into `/api/documents/upload`
-- [x] Knowledge record generation (`scripts/generate_knowledge_records.py`) — 176,054 records
-- [x] Phase 2 API endpoints + tests (11 passing total through Phase 2)
+Complete. 18 Synthea tables + application/authorization/provenance tables (29 total), idempotent importer (row counts verified exact), Alembic migration, 176,054 knowledge records generated. 11 tests (cumulative).
 
 ## Phase 3 — Secure RAG
-- [x] `EmbeddingProvider` abstraction (`backend/app/services/embedding_provider.py`) — Sentence Transformers (`all-MiniLM-L6-v2`), configurable
-- [x] `VectorStore` abstraction (`backend/app/services/vector_store.py`) — Qdrant, embedded local mode by default (no server process required), payload indexes, swappable to a real Qdrant server via env vars
-- [x] `scripts/index_knowledge.py` — batched (200/batch), idempotent upsert of all `knowledge_records` into Qdrant
-- [x] `AuthorizationContext` builder (`backend/app/authorization/context.py`) — role → allowed record types/sensitivity/patient scope, resolved from real `patient_assignments` rows, never from client input
-- [x] Qdrant filter builder (`backend/app/authorization/qdrant_filter.py`) — the actual retrieval-time authorization boundary
-- [x] `LLMProvider` abstraction (`backend/app/services/llm_provider.py`) — Groq/OpenAI, with a non-hallucinating extractive fallback when no API key is configured (see progress/DECISIONS.md)
-- [x] `POST /api/rag/query` (`backend/app/api/rag.py`) — authenticated, cited, audit-logged; `debug` block (filter + retrieved ids) returned only to ADMIN
-- [x] Hard patient-level pre-retrieval denial (a specific unassigned patient never reaches Qdrant, let alone the LLM)
-- [x] `audit_logs` writes on every query (ANSWERED/DENIED/NO_AUTHORIZED_CONTEXT)
-- [x] 9 new focused security tests (6 in `test_rag_authorization.py` against a real temp Qdrant collection, 3 in `test_rag_pipeline.py` including the "security invariant" test that inspects the literal text handed to the LLM)
-- [ ] Reranking / hybrid lexical search (explicitly optional per spec; not implemented)
-- [ ] PDF-uploaded knowledge chunks are not yet auto-indexed into Qdrant on upload (Synthea backlog is indexed via the script; wiring the upload endpoint to index-on-upload is the next concrete task)
-- [ ] Frontend (login/dashboard/chat/upload/admin UI) — not started
-- [ ] Admin debug *view* (the API already returns the debug block to ADMIN; there's no UI page for it yet)
+Complete (backend). Qdrant (embedded local mode), Sentence Transformers embeddings, `AuthorizationContext`/Qdrant-filter retrieval-time security boundary, `POST /api/rag/query` with citations + audit logging, LLM provider with extractive fallback. 20 tests (cumulative).
 
-## Phase 3 Verification
-- Real-Qdrant filter tests: PASS (6/6) — doctor sees only assigned-patient clinical+operational records; finance sees only claims, never clinical; reception sees only encounters; admin sees everything; a doctor with zero assignments matches nothing (not "everything")
-- Security invariant test: PASS — `test_finance_query_never_sends_clinical_content_to_llm` inspects the actual context string passed to the LLM provider and asserts restricted content is absent from it, not just absent from the final answer
-- Patient-level hard denial: PASS — an unassigned patient reference returns `DENIED` with `retrieved_count == 0` and the LLM provider is never even invoked
-- Full backend suite: 20/20 passing (11 from Phase 1/2 + 9 new Phase 3 tests)
-- Live indexing of the real 176,054 knowledge records into Qdrant: STARTED (see Known Issues — running at the time of this update)
+**All 176,054 knowledge records are now actually indexed in Qdrant** (the background job that was running at the end of the last session finished: `Done. 176054 points upserted. Collection count: 176054`, ~78 minutes CPU-bound on this machine).
 
-## Latest Completed Work
-Implemented the Phase 3 backend core: embedding provider, Qdrant vector store (embedded local mode), the authorization-context/filter pair that is the actual retrieval-time security boundary, the LLM provider abstraction with a grounded extractive fallback, and the `/api/rag/query` endpoint with citations and audit logging. Added 9 focused tests that exercise a real (temporary) Qdrant collection rather than mocking the filter logic, including one that inspects the literal prompt text sent to the LLM to prove restricted content was never supplied to it. Started a full re-index of the 176,054 Synthea-derived knowledge records.
+**Live-verified end-to-end against the real dataset** (not just the fixture-based tests): asked the identical question ("What conditions does this patient have?") about the same real assigned patient as both `doctor01` and `finance01`. Doctor received clinical conditions/observations; Finance — same patient, same question — only ever retrieved claims/claim_transactions, never clinical content. This confirms the retrieval-time filter works correctly against the full real index, not only the small test fixtures.
+
+## Frontend (NEW)
+Status: CORE FLOWS IMPLEMENTED
+
+### Stack
+Vite + React + TypeScript + Tailwind CSS v3 + hand-written shadcn-style components (Button, Input, Select, Card, Badge, Avatar, Dialog, Progress, Textarea, Separator, Label) over Radix UI primitives + lucide-react icons. No component framework beyond that — kept lightweight per the brief.
+
+### Completed
+- [x] API client (`src/api/client.ts`) — token in sessionStorage, 401 → auto-logout, generic error messages (never raw server internals)
+- [x] Auth state (`src/auth/AuthContext.tsx`) — login/logout/me, used by every page
+- [x] Login page — username/password/role, "Use demo account" autofill per role (never bypasses backend validation)
+- [x] App shell — sidebar with Patients/Assistant nav, role icon + name + department, logout
+- [x] Patients dashboard — patient IDs only (no names/DOB/PII), status badges (Stable/Attention/No Recent Information) sourced from the new `/api/patients/{id}/status` endpoint, which reuses the exact same `retrieve_authorized_sources()` the chat endpoint uses — not a second independent "status AI" and not frontend-invented
+- [x] Patient card click → opens Assistant with patient context chip
+- [x] RAG chat — role-specific placeholder + quick prompts, renders answer + citations, distinct UI for DENIED ("Access restricted") and NO_AUTHORIZED_CONTEXT ("No authorized information found")
+- [x] PDF upload dialog — gated to DOCTOR/NURSE/ADMIN in the UI (backend still enforces independently), shows processing state and the real backend response message, refreshes the patient list on success
+- [x] Admin stats bar (patients/conditions/medications/claims/knowledge_records) — ADMIN role only, real backend numbers
+- [x] CORS configured on the backend for `http://localhost:5173`
+- [x] Production build verified clean (`npm run build`, no TS errors)
+- [ ] Admin retrieval-debug panel UI (the API already returns the `debug` block to ADMIN on `/api/rag/query` — no page surfaces it yet)
+- [ ] Ingestion status polling UI (upload dialog shows the final result; no live RECEIVED→EXTRACTING→...→COMPLETED progress stream yet — backend has the states, frontend doesn't poll them)
+
+### New backend endpoints added for the frontend (reuse existing authorization/RAG, no new security logic)
+- `GET /api/patients` — authorized patient ids only, scoped identically to what RAG would retrieve for that user (`assigned` for DOCTOR/NURSE from real `patient_assignments`, `all`-paginated otherwise)
+- `GET /api/patients/{id}/status` — deterministic, evidence-based status derived from the same retrieval pipeline (condition record found → "Attention"; none → "Stable"; retrieval denied/empty → "No Recent Information")
+- `app/rag/pipeline.py` refactored to expose `retrieve_authorized_sources()` so both the chat endpoint and the status endpoint share one retrieval-authorization code path rather than duplicating it
+
+### Frontend Verification
+- [x] Production build succeeds, no TypeScript errors
+- [x] Vite dev server serves and transforms the module graph correctly
+- [x] CORS preflight from `localhost:5173` to the backend succeeds
+- [ ] Manual in-browser click-through (no browser automation tool was available in this session — verified via build + dev-server module transform + direct API checks instead; a human should still click through once before the jury demo)
+
+## Known Issues
+- GitHub push still blocked: both tokens provided so far got a 403 ("Permission ... denied to NikhilMMugali") — token likely needs `repo` scope (classic) or explicit repository + Contents:Read-and-write access (fine-grained). Everything is committed locally and ready the instant a working token is provided.
+- PostgreSQL 16 finished installing via Homebrew (background job completed) but the project has not been switched over yet — still running on SQLite + embedded Qdrant. Not blocking; do before the final demo per the original Phase 2 plan.
+- The extractive LLM fallback (no API key configured) sometimes returns an authorized-but-not-very-relevant answer when the authorized domain doesn't semantically match the question (e.g., Finance asking a clinical-sounding question gets the top authorized *claim* record back, not a "not relevant" message) — this is a quality issue, not a security issue: it never crosses the authorization boundary, it just doesn't know to say "I found authorized records but none seem relevant." Worth adding a relevance threshold or a real LLM key before the demo for better-sounding answers.
+- `backend/data/qdrant` and `frontend/node_modules`, `frontend/dist` are gitignored (build/test artifacts, not source).
 
 ## Latest Commit
 (pending — see Next Task)
 
-## Known Issues
-- **Indexing the full 176,054 knowledge records into Qdrant is CPU-bound and was still running at the time this file was last updated.** Re-check `scripts/index_knowledge.py`'s output / the Qdrant collection count before relying on live end-to-end queries against real Synthea data; the authorization logic itself is already verified against a real Qdrant fixture collection independent of this.
-- PostgreSQL still isn't running locally (see Phase 2 notes) — Phase 3 was also built and verified against SQLite + embedded Qdrant.
-- GitHub push is still blocked — no credentials available on this machine (see below).
-- `knowledge_records` doesn't yet cover allergies/procedures/careplans/immunizations/imaging/devices/payers (same gap as Phase 2).
-- Query routing (section 17 of the Phase 3 spec — classifying a question as clinical/finance/operational before retrieval) is not implemented; the authorization filter alone determines what's retrievable, and semantic similarity determines relevance within that authorized set. This is simpler and still secure, just not as retrieval-quality-optimized as explicit routing would be.
-
-## GitHub Push Status (2026-10-08)
-`origin` is `https://github.com/NikhilMMugali/MediGaurd-RAG.git` (confirmed with the user). The remote's placeholder `main` branch was merged non-destructively into local `master`. Push is still blocked: no `gh` CLI, no SSH key, no stored HTTPS credentials on this machine. User chose to skip pushing for now. Local `master` remains ready to push as soon as credentials are available.
-
 ## Next Task
-1. Let `scripts/index_knowledge.py` finish; verify the Qdrant collection count matches `knowledge_records` count, and run the acceptance-test questions live over HTTP.
-2. Wire `/api/documents/upload` to index a newly-created knowledge record immediately (currently only Synthea's backlog is indexed by the script).
-3. Build the minimal frontend (login, chat, upload, admin debug view).
-4. Re-verify everything against real PostgreSQL once available, and push to GitHub once credentials are available.
+1. Commit and push the frontend once a working GitHub token is available.
+2. Manual click-through in an actual browser before the jury demo (login per role, patient click → chat, upload → immediately queryable, role-switch denial).
+3. Optional: admin retrieval-debug panel UI, ingestion status polling, a relevance threshold on retrieval, switch to real PostgreSQL.
 
 ## Last Updated
 2026-10-08

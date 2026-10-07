@@ -74,6 +74,14 @@ Each script is idempotent — safe to re-run. **Current local dev state:** Postg
 
 The dataset is already extracted at `data/synthea/` (18 CSVs; not committed — see `.gitignore`). `scripts/import_synthea.py` imports all 18 files in dependency order and reports row counts, which should match the inventory in [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md) exactly.
 
+### Index knowledge into Qdrant
+
+```bash
+python scripts/index_knowledge.py
+```
+
+Embeds every `knowledge_records` row (batched, idempotent) into Qdrant's embedded local store at `QDRANT_PATH` (no separate Qdrant server needed — see `.env.example`). This is CPU-bound and took ~78 minutes for the full 176,054-record Synthea backlog on the build machine; a newly uploaded PDF's records are indexed immediately by the upload endpoint itself, so this script only needs to run once for the initial backlog (or to catch up anything that failed to index at upload time).
+
 ### Run the backend
 
 ```bash
@@ -82,6 +90,17 @@ uvicorn app.main:app --reload
 ```
 
 Then `curl http://127.0.0.1:8000/health` → `{"status":"ok","service":"MediGaurd RAG backend"}`.
+
+### Run the frontend
+
+```bash
+cd frontend
+npm install
+cp .env.example .env   # VITE_API_BASE_URL, defaults to http://localhost:8000
+npm run dev
+```
+
+Open `http://localhost:5173`. The login page's "Use demo account" selector autofills the seeded credentials below for the chosen role — the backend still independently verifies the stored role on every login.
 
 ### Run tests
 
