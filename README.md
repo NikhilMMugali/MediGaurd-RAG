@@ -3,7 +3,7 @@
 Secure hospital intelligence assistant built for the Code Carnival hackathon. Combines a preloaded synthetic hospital database (Synthea) with live PDF uploads into one unified, role-aware, cited RAG system.
 
 **Team:** Nikhil Mugali (Lead), Prince Naliyapara, Titli Rajdev, Nanditi Joshi
-**Repository:** https://github.com/NikhilMMugali/MediGaurd-RAG-.git
+**Repository:** https://github.com/NikhilMMugali/MediGaurd-RAG.git
 
 ## Problem Statement
 

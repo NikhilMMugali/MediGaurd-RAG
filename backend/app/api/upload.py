@@ -8,10 +8,13 @@ from app.config import get_settings
 from app.db.session import get_db
 from app.ingestion.pdf_extractor import PdfExtractionError, extract_pdf
 from app.ingestion.pdf_mapper import extract_patient_document_data, map_to_database
-from app.models.documents import IngestionJob, SourceDocument
+from app.models.documents import IngestionJob, KnowledgeRecord, SourceDocument
 from app.models.provenance import new_uuid
 from app.models.user import RoleEnum, User
+from app.rag.indexing import index_records
 from app.schemas.ingestion import UploadResponse
+from app.services.embedding_provider import get_embedding_provider
+from app.services.vector_store import get_vector_store
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 settings = get_settings()
@@ -62,13 +65,11 @@ async def upload_document(
     db.add(job)
     db.flush()
 
-    # Phase 2 scope: rule-based section mapping into the canonical schema.
-    # Chunking, embedding and Qdrant indexing are Phase 3.
     job.status = "MAPPING"
     normalized = extract_patient_document_data(result)
 
     try:
-        records_created = map_to_database(db, normalized, document.id)
+        records_created, knowledge_record_ids = map_to_database(db, normalized, document.id)
     except Exception as exc:  # defend against a malformed mapping, not a reason to lose the upload
         job.status = "FAILED"
         job.error_message = str(exc)
@@ -77,8 +78,23 @@ async def upload_document(
         db.commit()
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Could not map PDF content to the database schema.") from exc
 
+    # Index immediately so the upload is searchable without an app restart
+    # or a separate script run (docs/DATA_FLOW.md step 11-13). A failure here
+    # does not fail the upload — the structured rows and knowledge_records
+    # already committed are real; scripts/index_knowledge.py can catch up
+    # later if Qdrant was briefly unavailable.
+    job.status = "CHUNKING"
+    chunks_indexed = 0
+    if knowledge_record_ids:
+        try:
+            records = db.query(KnowledgeRecord).filter(KnowledgeRecord.id.in_(knowledge_record_ids)).all()
+            chunks_indexed = index_records(records, get_embedding_provider(), get_vector_store())
+        except Exception as exc:  # noqa: BLE001 — indexing failure must not lose the upload
+            job.error_message = f"Indexing deferred: {exc}"
+
     job.status = "COMPLETED"
     job.records_created = records_created
+    job.chunks_created = chunks_indexed
     job.completed_at = datetime.utcnow()
     document.status = "COMPLETED"
     db.commit()
@@ -88,5 +104,8 @@ async def upload_document(
         file_name=result.file_name,
         status="COMPLETED",
         page_count=result.page_count,
-        message=f"Extracted {result.page_count} page(s); mapped {records_created} structured record(s) into the database.",
+        message=(
+            f"Extracted {result.page_count} page(s); mapped {records_created} structured record(s); "
+            f"indexed {chunks_indexed} knowledge chunk(s) into Qdrant."
+        ),
     )

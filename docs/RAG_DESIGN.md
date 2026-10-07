@@ -1,5 +1,7 @@
 # MediGaurd RAG — RAG Design (Phase 3)
 
+> **Implementation status (2026-10-08):** implemented in `backend/app/rag/pipeline.py`, `backend/app/authorization/`, `backend/app/services/{embedding_provider,vector_store,llm_provider}.py`. Qdrant runs in qdrant-client's embedded on-disk mode (`QDRANT_MODE=local`, no server process) so it needs no infrastructure beyond a writable directory; `QDRANT_MODE=server` + `QDRANT_URL` switches to a real Qdrant server with no other code changes. The LLM call itself falls back to a non-hallucinating extractive mode (returns the top authorized chunk's own text, cited) when no provider API key is configured — see `progress/DECISIONS.md`. Reranking and hybrid lexical search (stage 2-3 below) are not implemented.
+
 ## Pipeline
 
 ```text

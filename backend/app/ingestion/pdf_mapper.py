@@ -13,6 +13,7 @@ import re
 
 from sqlalchemy.orm import Session
 
+from app.models.documents import KnowledgeRecord
 from app.models.hospital import Allergy, Claim, Condition, Encounter, Medication, Patient, Procedure
 from app.models.provenance import new_uuid
 from app.schemas.ingestion import PdfExtractionResult
@@ -123,42 +124,107 @@ def find_or_create_patient(db: Session, info: PatientInfo | None, source_documen
     return patient
 
 
-def map_to_database(db: Session, data: PatientDocumentData, source_document_id: str) -> int:
+def _add_knowledge_record(
+    db: Session,
+    *,
+    patient_id: str | None,
+    record_type: str,
+    record_id: str,
+    sensitivity: str,
+    content: str,
+    source_document_id: str,
+    source_page: int | None,
+    source_section: str | None,
+) -> str:
+    """Mirrors app.services.knowledge_generator's pattern for Synthea data,
+    but for PDF-derived rows so an uploaded document's knowledge is
+    immediately indexable (see api/upload.py), not just inserted as a
+    structured row with no corresponding retrievable text."""
+    kr_id = new_uuid()
+    db.add(
+        KnowledgeRecord(
+            id=kr_id,
+            patient_id=patient_id,
+            record_type=record_type,
+            record_id=record_id,
+            source_type="UPLOADED_PDF",
+            source_document_id=source_document_id,
+            source_page=source_page,
+            source_section=source_section,
+            sensitivity=sensitivity,
+            content=content,
+        )
+    )
+    return kr_id
+
+
+def map_to_database(db: Session, data: PatientDocumentData, source_document_id: str) -> tuple[int, list[str]]:
     """Inserts every mappable item as a real row in the canonical tables,
-    stamped with source_type=UPLOADED_PDF + source_document_id + source_page.
-    Returns the number of records created."""
+    stamped with source_type=UPLOADED_PDF + source_document_id + source_page,
+    and a matching knowledge_records row so it's immediately indexable.
+    Returns (records_created, new_knowledge_record_ids)."""
     patient = find_or_create_patient(db, data.patient, source_document_id)
     patient_id = patient.id if patient else None
     created = 0
+    knowledge_record_ids: list[str] = []
 
     for item in data.conditions:
+        record_id = new_uuid()
         db.add(
             Condition(
-                id=new_uuid(),
+                id=record_id,
                 patient=patient_id,
                 description=item.description,
                 source_type="UPLOADED_PDF",
                 source_document_id=source_document_id,
+            )
+        )
+        knowledge_record_ids.append(
+            _add_knowledge_record(
+                db,
+                patient_id=patient_id,
+                record_type="condition",
+                record_id=record_id,
+                sensitivity="clinical",
+                content=f"Patient: {patient_id}\nRecord Type: Condition\nCondition: {item.description}",
+                source_document_id=source_document_id,
+                source_page=item.source_page,
+                source_section=item.source_section,
             )
         )
         created += 1
 
     for item in data.medications:
+        record_id = new_uuid()
         db.add(
             Medication(
-                id=new_uuid(),
+                id=record_id,
                 patient=patient_id,
                 description=item.description,
                 source_type="UPLOADED_PDF",
                 source_document_id=source_document_id,
             )
         )
+        knowledge_record_ids.append(
+            _add_knowledge_record(
+                db,
+                patient_id=patient_id,
+                record_type="medication",
+                record_id=record_id,
+                sensitivity="clinical",
+                content=f"Patient: {patient_id}\nRecord Type: Medication\nMedication: {item.description}",
+                source_document_id=source_document_id,
+                source_page=item.source_page,
+                source_section=item.source_section,
+            )
+        )
         created += 1
 
     for item in data.allergies:
+        record_id = new_uuid()
         db.add(
             Allergy(
-                id=new_uuid(),
+                id=record_id,
                 patient=patient_id,
                 description=item.description,
                 severity1=item.severity,
@@ -166,36 +232,78 @@ def map_to_database(db: Session, data: PatientDocumentData, source_document_id: 
                 source_document_id=source_document_id,
             )
         )
+        knowledge_record_ids.append(
+            _add_knowledge_record(
+                db,
+                patient_id=patient_id,
+                record_type="allergy",
+                record_id=record_id,
+                sensitivity="clinical",
+                content=f"Patient: {patient_id}\nRecord Type: Allergy\nAllergen: {item.description}",
+                source_document_id=source_document_id,
+                source_page=item.source_page,
+                source_section=item.source_section,
+            )
+        )
         created += 1
 
     for item in data.procedures:
+        record_id = new_uuid()
         db.add(
             Procedure(
-                id=new_uuid(),
+                id=record_id,
                 patient=patient_id,
                 description=item.description,
                 source_type="UPLOADED_PDF",
                 source_document_id=source_document_id,
+            )
+        )
+        knowledge_record_ids.append(
+            _add_knowledge_record(
+                db,
+                patient_id=patient_id,
+                record_type="procedure",
+                record_id=record_id,
+                sensitivity="clinical",
+                content=f"Patient: {patient_id}\nRecord Type: Procedure\nProcedure: {item.description}",
+                source_document_id=source_document_id,
+                source_page=item.source_page,
+                source_section=item.source_section,
             )
         )
         created += 1
 
     for item in data.encounters:
+        record_id = new_uuid()
         db.add(
             Encounter(
-                id=new_uuid(),
+                id=record_id,
                 patient=patient_id,
                 description=item.description,
                 source_type="UPLOADED_PDF",
                 source_document_id=source_document_id,
             )
         )
+        knowledge_record_ids.append(
+            _add_knowledge_record(
+                db,
+                patient_id=patient_id,
+                record_type="encounter",
+                record_id=record_id,
+                sensitivity="operational",
+                content=f"Patient: {patient_id}\nRecord Type: Encounter\nEncounter: {item.description}",
+                source_document_id=source_document_id,
+                source_page=item.source_page,
+                source_section=item.source_section,
+            )
+        )
         created += 1
 
     for item in data.claims:
+        record_id = new_uuid()
         db.add(
             Claim(
-                id=new_uuid(),
+                id=record_id,
                 patientid=patient_id,
                 outstandingp=item.outstanding,
                 statusp=item.status,
@@ -203,7 +311,20 @@ def map_to_database(db: Session, data: PatientDocumentData, source_document_id: 
                 source_document_id=source_document_id,
             )
         )
+        knowledge_record_ids.append(
+            _add_knowledge_record(
+                db,
+                patient_id=patient_id,
+                record_type="claim",
+                record_id=record_id,
+                sensitivity="finance",
+                content=f"Patient: {patient_id}\nRecord Type: Claim\nOutstanding: {item.outstanding}",
+                source_document_id=source_document_id,
+                source_page=item.source_page,
+                source_section=item.source_section,
+            )
+        )
         created += 1
 
     db.commit()
-    return created
+    return created, knowledge_record_ids

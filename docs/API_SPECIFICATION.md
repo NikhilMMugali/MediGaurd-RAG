@@ -56,11 +56,30 @@ Planned for Phase 2/3 (not yet implemented): schema mapping to structured tables
 ### `GET /health`
 Implemented. Returns `{"status": "ok", "service": "MediGaurd RAG backend"}`. No authentication required.
 
-## Planned — RAG (Phase 3)
+## RAG (Phase 3 — implemented)
 
 ### `POST /api/rag/query`
-Request: `{ "question": "What is patient P001's diagnosis?" }` with bearer token.
-Response: `{ "answer": "...", "citations": [...], "authorization_debug": {...} }` (debug block visible to ADMIN only, or behind a separate admin endpoint).
+Implemented — `backend/app/api/rag.py`. Requires `Authorization: Bearer <jwt>`.
+
+Request:
+```json
+{ "question": "What is the diagnosis for patient <uuid>?", "patient_id": null }
+```
+`patient_id` is optional and never a security parameter — it only disambiguates which already-authorized patient is meant (Synthea ids are UUIDs, not human-friendly codes, so a UUID appearing literally in `question` is also detected automatically). Authorization always comes from the authenticated user, never from the request body.
+
+Response `200`:
+```json
+{
+  "answer": "...",
+  "status": "ANSWERED",
+  "citations": [
+    {"source_id": "SOURCE_1", "source_type": "SYNTHEA", "record_id": "...", "file_name": null, "page": null, "section": "condition"}
+  ],
+  "retrieved_count": 3,
+  "debug": null
+}
+```
+`status` is one of `ANSWERED`, `DENIED` (a specific patient was identified and is not assigned to this user — the vector store is never even queried), or `NO_AUTHORIZED_CONTEXT` (no authorized chunk matched, or a patient-scoped role has zero assignments). `debug` (the constructed authorization filter + retrieved record ids) is populated only when the caller is `ADMIN`, and never contains the content of an excluded record.
 
 ## Planned — Admin (Phase 3)
 

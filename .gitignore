@@ -19,6 +19,9 @@ data/synthea/*.zip
 .coverage
 htmlcov/
 qdrant_storage/
+data/qdrant/
+backend/data/
 postgres_data/
 *.db
 *.db-journal
+.claude/

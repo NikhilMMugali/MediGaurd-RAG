@@ -3,7 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import admin, auth, health, patients, upload
+from app.api import admin, auth, health, patients, rag, upload
 from app.config import get_settings
 from app.utils.logging import configure_logging
 
@@ -31,3 +31,4 @@ app.include_router(auth.router)
 app.include_router(upload.router)
 app.include_router(patients.router)
 app.include_router(admin.router)
+app.include_router(rag.router)
