@@ -49,7 +49,9 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 20
     upload_dir: str = "./data/uploads"
 
-    synthea_csv_dir: str = "./data/synthea"
+    # The app imports from the clean, deterministic 100-patient dataset
+    # (docs/CLEAN_DATASET.md), not the raw Synthea export directly.
+    synthea_csv_dir: str = "./data/clean"
 
 
 @lru_cache
