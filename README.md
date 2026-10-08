@@ -5,16 +5,14 @@
 
 MediGaurd RAG is a secure hospital intelligence assistant built for the **Code Carnival Hackathon**. It combines a cleaned synthetic hospital database derived from **Synthea** with live PDF uploads into one unified, role-aware, citation-grounded RAG system.
 
-> 🔐 **Core Principle: Unauthorized information must never be retrieved and sent to the LLM.**
-
-**Team:** Nikhil Mugali (Lead) · Prince Naliyapara · Titli Rajdev · Nanditi Joshi  
-**Repository:** https://github.com/NikhilMMugali/MediGaurd-RAG.git
+Team: Nikhil Mugali (Lead) · Prince Naliyapara · Titli Rajdev · Nanditi Joshi  
+Repository: https://github.com/NikhilMMugali/MediGaurd-RAG.git
 
 ---
 
-## 🚨 Problem Statement
+🚨 Problem Statement
 
-> **Secure Multi-Modal RAG System with Access Control**
+Secure Multi-Modal RAG System with Access Control**
 
 Hospitals contain sensitive information across structured databases, clinical records, financial systems, and documents. A useful AI assistant must not only answer questions accurately, but also ensure that a user can **never access information outside their authorization scope**.
 
