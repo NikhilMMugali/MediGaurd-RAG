@@ -15,7 +15,7 @@
 8. SCHEMA MAPPING        map to patients/conditions/medications/allergies/procedures/encounters/claims [implemented — app/ingestion/pdf_mapper.py::map_to_database]
 9. VALIDATION            Pydantic intermediate schema (app/schemas/pdf_normalization.py) [implemented]
 10. DATABASE INSERTION   insert rows, stamped with source_type=UPLOADED_PDF + source_document_id [implemented; new-patient dedup via external_patient_id/name]
-11. SCHEMA-AWARE KNOWLEDGE GENERATION  atomic + narrative chunks          [implemented for Synthea data (176,054 knowledge_records via scripts/generate_knowledge_records.py); not yet wired for uploaded-PDF rows — Phase 3]
+11. SCHEMA-AWARE KNOWLEDGE GENERATION  atomic + narrative chunks          [implemented for Synthea data (scripts/generate_knowledge_records.py, from the clean 100-patient dataset — see docs/CLEAN_DATASET.md for current counts) and for uploaded-PDF rows (app/ingestion/pdf_mapper.py — a knowledge_records row is created inline as each structured row is mapped, not a separate pass)]
 12. EMBEDDING            EmbeddingProvider                                [Phase 3]
 13. QDRANT UPSERT        chunk + full security metadata payload          [Phase 3]
 14. READY FOR RAG        immediately queryable                           [Phase 3]

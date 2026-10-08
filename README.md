@@ -62,17 +62,26 @@ cp .env.example .env   # fill in real secrets/API keys locally, never commit .en
 ```bash
 docker compose up -d postgres qdrant   # or point DATABASE_URL at any PostgreSQL instance
 alembic -c backend/alembic.ini upgrade head
-python scripts/seed_users.py
-python scripts/import_synthea.py
-python scripts/seed_authorization_data.py
-python scripts/generate_knowledge_records.py
+cd backend  # SYNTHEA_CSV_DIR/.env are resolved relative to cwd — run these from here
+python ../scripts/build_clean_dataset.py     # data/raw/synthea_original -> data/clean (see docs/CLEAN_DATASET.md)
+python ../scripts/validate_clean_dataset.py
+python ../scripts/seed_users.py
+python ../scripts/import_synthea.py          # imports data/clean
+python ../scripts/seed_authorization_data.py
+python ../scripts/generate_knowledge_records.py
 ```
 
 Each script is idempotent — safe to re-run. **Current local dev state:** PostgreSQL/Docker were unavailable on the build machine, so local verification ran against SQLite (`DATABASE_URL=sqlite:///...` in `.env`); the schema is plain SQLAlchemy with no Postgres-specific types, so switching `DATABASE_URL` to a real PostgreSQL instance needs no code changes — see [progress/DECISIONS.md](progress/DECISIONS.md).
 
-### Synthea import
+### Dataset
 
-The dataset is already extracted at `data/synthea/` (18 CSVs; not committed — see `.gitignore`). `scripts/import_synthea.py` imports all 18 files in dependency order and reports row counts, which should match the inventory in [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md) exactly.
+The app imports from `data/clean/` — a deterministic, demo-safe 100-patient
+subset of the full Synthea sample (clean display ids, synthetic names,
+sensitive identifiers dropped). See [docs/CLEAN_DATASET.md](docs/CLEAN_DATASET.md)
+for what changed and why, and how to rebuild it from `data/raw/synthea_original/`
+(the untouched original export; not committed — see `.gitignore`).
+`scripts/import_synthea.py` imports every CSV in `SYNTHEA_CSV_DIR`
+(`data/clean` by default) in dependency order and reports row counts.
 
 ### Index knowledge into Qdrant
 
@@ -80,7 +89,7 @@ The dataset is already extracted at `data/synthea/` (18 CSVs; not committed — 
 python scripts/index_knowledge.py
 ```
 
-Embeds every `knowledge_records` row (batched, idempotent) into Qdrant's embedded local store at `QDRANT_PATH` (no separate Qdrant server needed — see `.env.example`). This is CPU-bound and took ~78 minutes for the full 176,054-record Synthea backlog on the build machine; a newly uploaded PDF's records are indexed immediately by the upload endpoint itself, so this script only needs to run once for the initial backlog (or to catch up anything that failed to index at upload time).
+Embeds every `knowledge_records` row (batched, idempotent) into Qdrant's embedded local store at `QDRANT_PATH` (no separate Qdrant server needed — see `.env.example`). CPU-bound; a newly uploaded PDF's records are indexed immediately by the upload endpoint itself, so this script only needs to run once for the initial backlog (or to catch up anything that failed to index at upload time, or after rebuilding the clean dataset).
 
 ### Run the backend
 

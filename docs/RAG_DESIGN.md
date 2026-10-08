@@ -1,29 +1,43 @@
 # MediGaurd RAG — RAG Design (Phase 3)
 
-> **Implementation status (2026-10-08):** implemented in `backend/app/rag/pipeline.py`, `backend/app/authorization/`, `backend/app/services/{embedding_provider,vector_store,llm_provider}.py`. Qdrant runs in qdrant-client's embedded on-disk mode (`QDRANT_MODE=local`, no server process) so it needs no infrastructure beyond a writable directory; `QDRANT_MODE=server` + `QDRANT_URL` switches to a real Qdrant server with no other code changes. The LLM call itself falls back to a non-hallucinating extractive mode (returns the top authorized chunk's own text, cited) when no provider API key is configured — see `progress/DECISIONS.md`. Reranking and hybrid lexical search (stage 2-3 below) are not implemented.
+> **Implementation status (2026-10-08):** implemented in `backend/app/rag/pipeline.py`, `backend/app/authorization/`, `backend/app/services/{embedding_provider,vector_store,llm_provider}.py`. Qdrant runs in qdrant-client's embedded on-disk mode (`QDRANT_MODE=local`, no server process) so it needs no infrastructure beyond a writable directory; `QDRANT_MODE=server` + `QDRANT_URL` switches to a real Qdrant server with no other code changes. The LLM call itself falls back to an explicit "generation unavailable" dev-mode message (never raw chunk data disguised as an answer) when no provider API key is configured or the call fails — see `progress/DECISIONS.md`. Reranking and hybrid lexical search (stage 2-3 below) are not implemented.
+>
+> **Hybrid retrieval update (2026-10-08):** the pipeline below describes the *semantic* path only. As of the "clean dataset + hybrid RAG" iteration, `app/rag/query_classification.py` first decides a `route` — `structured` (an exact SQL lookup in `app/rag/structured_answers.py` answers directly, no Qdrant/LLM call at all), `summary` (a deterministic cross-domain rollup, also no LLM), or `semantic` (the pipeline below). Authorization (`AuthorizationContext` + the record-type intersection) is computed once in `_authorize_and_classify()` and applies identically to all three routes — see progress/DECISIONS.md "Hybrid retrieval."
 
-## Pipeline
+## Pipeline (semantic route)
 
 ```text
 User question
-     ↓ query normalization
+     ↓ patient-context resolution (resolve_patient_reference: UI's
+         Pxxx display id, or a pasted UUID, -> the real internal id)
      ↓ AuthorizationContext (built from PostgreSQL: role, department,
          ward_ids, assigned_patient_ids, allowed_record_types,
          allowed_sensitivity_levels, allowed_document_ids)
-     ↓ optional query/domain classification (clinical vs finance vs operational)
+     ↓ query classification (app/rag/query_classification.py) — record
+         type(s)/observation category/recency, always intersected with
+         (never widening) the AuthorizationContext above
      ↓ embedding (EmbeddingProvider)
      ↓ filtered vector retrieval — Qdrant search() called WITH the
          authorization filter attached; restricted chunks never leave
-         the vector store
-     ↓ top-K authorized candidates
-     ↓ optional reranking
+         the vector store. A known patient uses an indexed-SQL-then-
+         retrieve-by-id fast path instead of a filtered Qdrant scan
+         (see progress/DECISIONS.md "Qdrant local-mode" entries)
+     ↓ top-K authorized candidates, ranked by relevance (+ recency blend
+         when the question asked for "recent"/"latest")
      ↓ context assembly (only authorized chunks, with provenance kept)
      ↓ LLM generation
-     ↓ citation validation (every citation must resolve to a chunk
-         that was actually in the authorized context assembled above)
+     ↓ citation validation (every [SOURCE_n] the model cites must
+         resolve to a source actually in the assembled context —
+         anything else is stripped, never silently passed through)
      ↓ audit_logs write
      ↓ grounded answer + citations
 ```
+
+Exact-fact questions (patient identity, medications, conditions,
+allergies, procedures, encounters, finance, recent observations) skip
+this entirely — `app/rag/structured_answers.py` builds the answer and
+citations straight from SQLAlchemy rows once authorization has computed
+the same allowed record types.
 
 ## System prompt contract
 

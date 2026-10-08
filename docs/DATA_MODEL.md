@@ -53,7 +53,11 @@ This is what makes citations exact rather than approximate: a generated answer c
 
 ## New-patient handling
 
-A PDF-introduced patient not present in Synthea gets a new `patients` row. The PDF's own patient identifier is kept as `external_patient_id` rather than overwriting or guessing a match against an existing Synthea patient. Deduplication compares identifier, name, and date of birth, and ambiguous matches are flagged rather than silently merged.
+A PDF-introduced patient not present in Synthea gets a new `patients` row. The PDF's own patient identifier is kept as `external_patient_id` rather than overwriting or guessing a match against an existing Synthea patient. Deduplication compares identifier, name, and date of birth, and ambiguous matches are flagged rather than silently merged. It also gets the next free `display_id` (see below), so it shows up in the UI as `P101`, `P102`, ... rather than its raw UUID.
+
+## Display id vs internal id
+
+`patients.id` is the real internal id — every other table's patient FK (`conditions.patient`, `knowledge_records.patient_id`, `patient_assignments.patient_id`, etc.) points at it, unchanged. `patients.display_id` is a separate, independent, unique column holding the clean id the UI actually shows (`P001`..`P100` for the clean dataset, `P101`+ for anything introduced later via PDF upload) — see [docs/CLEAN_DATASET.md](CLEAN_DATASET.md). `app.rag.pipeline.resolve_patient_reference()` is the one place a display id (or a legacy raw UUID) is turned back into the internal id, before any authorization check or query runs.
 
 ## Entity relationship sketch
 

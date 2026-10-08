@@ -73,5 +73,39 @@ Fixed the "answers look like raw database dumps" complaint end to end:
 2. Manual click-through in an actual browser before the jury demo (login per role, patient click → chat, upload → immediately queryable, role-switch denial).
 3. Optional: admin retrieval-debug panel UI, ingestion status polling, switch to real PostgreSQL, backfill observation_category into existing Qdrant payloads for the general (no-patient) retrieval path.
 
+## Clean dataset + hybrid RAG + chat quality + UI/UX pass (2026-10-08)
+
+### Data Refinement
+- [x] Clean 100-patient dataset (`scripts/build_clean_dataset.py` — deterministic, no RNG)
+- [x] Synthetic demographics (fictional name pairs, SSN/DRIVERS/PASSPORT dropped)
+- [x] Observation filtering (RAG knowledge layer excludes survey/social-history/uncategorized; structured DB keeps everything)
+- [x] Finance cleanup (claims/claims_transactions/payers/payer_transitions filtered to the 100 patients; reference tables kept whole)
+- [x] Referential validation (`scripts/validate_clean_dataset.py`)
+- [x] Database reimport (fresh DB from `data/clean/`, old 108-patient/176k-record DB preserved as `medigaurd_dev.db.pre_clean_backup`)
+- [x] Knowledge regeneration (added allergy/procedure generators; observation generator now category-filtered)
+- [x] Qdrant reindex (old `data/qdrant` preserved as `data/qdrant.pre_clean_backup`, fresh collection built from the new knowledge records)
+
+### Hybrid RAG
+- [x] Query routing (`app/rag/query_classification.py` now returns a `route`: structured/summary/semantic)
+- [x] Structured exact retrieval (`app/rag/structured_answers.py` — identity, medication, condition, allergy, procedure, encounter, finance outstanding/payer, recent observations — zero LLM calls, can't hallucinate)
+- [x] Semantic retrieval (unchanged Qdrant+LLM path for open-ended/contextual questions)
+- [x] Hybrid/summary (deterministic cross-domain rollup, also no LLM)
+- [x] Patient-context handling (`Patient.display_id` "Pxxx" + `resolve_patient_reference()`; frontend resends the selected patient with every message, so pronoun follow-ups like "what about his allergies?" resolve correctly without any server-side session state)
+- [x] Recency handling (date-aware structured retrieval for "recent observations"; relevance+recency blend retained for the semantic path)
+- [x] Answer synthesis (structured routes build markdown directly; semantic path's LLM prompt unchanged from the prior RAG-quality-fix session)
+- [x] Citation validation (`_validate_citations` strips any `[SOURCE_n]` the LLM cites beyond what was actually retrieved)
+
+### UX
+- [x] Markdown rendering (`react-markdown` + `remark-gfm` in `ChatMessage.tsx`, replacing raw `**bold**`/`|table|` text)
+- [x] Better answer layout (narrower max-width, lighter source separation instead of a boxed list)
+- [x] Better citation display (grouped by record type + date instead of one row per source; real file names resolved for PDF citations)
+- [x] Patient ID cleanup (dashboard/chip/input placeholder show `Pxxx`, never the raw UUID)
+- [x] Chat spacing (tightened message/source spacing)
+- [x] Loading state ("MediGaurd is thinking..." + spinner, was "...retrieving authorized information...")
+- [x] Patient card refinement (no more UUID truncation; status still backend-derived)
+- [ ] Upload UX refinement (not touched this pass — existing dialog/polling behavior kept as-is)
+
+See progress/DECISIONS.md for the full architecture writeup and docs/CLEAN_DATASET.md for the dataset build details.
+
 ## Last Updated
 2026-10-08

@@ -1,7 +1,7 @@
 # MediGaurd RAG — TODO
 
 ## Immediate
-- [x] Verify `scripts/index_knowledge.py` finished — 176,054/176,054 indexed — and live-tested doctor vs finance on the same patient/question over real HTTP
+- [x] Rebuilt on the clean 100-patient dataset (`data/clean/`) — old 108-patient/176,054-record DB and Qdrant collection kept as `.pre_clean_backup` — reindexed from 156,707 knowledge records
 - [ ] Push to https://github.com/NikhilMMugali/MediGaurd-RAG.git — two tokens tried so far both got 403 (permission denied); needs a token with `repo` scope (classic) or explicit repo + Contents:Read-and-write (fine-grained)
 - [ ] Switch to real PostgreSQL — brew finished installing postgresql@16; not yet migrated over (still on SQLite)
 - [ ] Manual browser click-through of the frontend before the jury demo (no browser automation tool was available this session; verified via production build + dev-server transform + direct API/CORS checks instead)
@@ -13,8 +13,9 @@
 
 ## Phase 3 — remaining
 - [ ] Optional reranking / hybrid lexical search (explicitly optional per spec — skip unless it demonstrably improves answers)
-- [ ] Extend `knowledge_generator.py` to cover allergies/procedures/careplans/immunizations/imaging/devices/payers (currently: conditions/medications/observations/encounters/claims/claim_transactions) and re-run `scripts/index_knowledge.py`
-- [ ] Query routing / domain classification (spec section 17) — not implemented; currently the authorization filter alone determines the retrievable set, semantic similarity determines relevance within it
+- [ ] Extend `knowledge_generator.py` to cover careplans/immunizations/imaging/devices/payers (allergies and procedures done this pass; these remain structured-DB-queryable but not semantically indexed)
+- [x] Query routing / hybrid retrieval — `app/rag/query_classification.py` + `app/rag/structured_answers.py`: exact-fact questions (identity, medication, condition, allergy, procedure, encounter, finance, recent observations) now answer from a deterministic SQL lookup, never Qdrant/LLM; open-ended questions still use semantic retrieval
+- [ ] Hospital-policy document corpus (infection-control guidance etc.) — deliberately not built this pass, see progress/DECISIONS.md "Scope decision"
 
 ## Known gaps to revisit (tracked in progress/DECISIONS.md and PROGRESS.md)
 - [x] LLM calls fall back to a non-hallucinating extractive mode when no key is configured — `GROQ_API_KEY` now set, real generation is the normal path; fallback (`DevModeProvider`) only appears with an explicit "unavailable" message if the key is missing or the call fails

@@ -38,6 +38,8 @@ PostgreSQL holds every structured fact (patients, encounters, conditions, claims
 
 ## Request flow — chat query (authorization-first retrieval)
 
+> **Hybrid retrieval update:** the flow below is the *semantic* path. As implemented, step 2's AuthorizationContext is computed once and then either feeds a Qdrant filter (steps 3–4 below, for open-ended/contextual questions) or routes to a direct, deterministic SQL lookup in `app/rag/structured_answers.py` for exact-fact questions (identity, medications, conditions, encounters, finance, recent observations) — skipping Qdrant and the LLM entirely for those, since a database lookup can't hallucinate. Authorization is identical either way; only the retrieval mechanism differs. See `app/rag/query_classification.py` and `progress/DECISIONS.md` ("Hybrid retrieval").
+
 ```text
 User → FastAPI /api/rag/query
    1. Authenticate (JWT) → load User row from PostgreSQL

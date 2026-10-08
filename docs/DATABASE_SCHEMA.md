@@ -2,7 +2,7 @@
 
 ## Source: Synthea CSV inventory (verified)
 
-18 CSV files, ~108 patients.
+18 CSV files, ~108 patients — this is the **raw** export preserved at `data/raw/synthea_original/`. The application actually imports a deterministic 100-patient subset of this at `data/clean/`; see [docs/CLEAN_DATASET.md](CLEAN_DATASET.md) for what was narrowed and why, and for the clean dataset's own row counts.
 
 | File | Rows |
 |---|---|

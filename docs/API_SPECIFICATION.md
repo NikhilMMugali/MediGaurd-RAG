@@ -74,9 +74,9 @@ Implemented — `backend/app/api/rag.py`. Requires `Authorization: Bearer <jwt>`
 
 Request:
 ```json
-{ "question": "What is the diagnosis for patient <uuid>?", "patient_id": null }
+{ "question": "What medications is P001 taking?", "patient_id": "P001" }
 ```
-`patient_id` is optional and never a security parameter — it only disambiguates which already-authorized patient is meant (Synthea ids are UUIDs, not human-friendly codes, so a UUID appearing literally in `question` is also detected automatically). Authorization always comes from the authenticated user, never from the request body.
+`patient_id` is optional and never a security parameter — it only disambiguates which already-authorized patient is meant. Callers pass the clean display id (`P001`, as shown in the UI); a legacy raw internal UUID is also accepted, and either form appearing literally in `question` text is detected automatically (`app.rag.pipeline.resolve_patient_reference`). Authorization always comes from the authenticated user, never from the request body.
 
 Response `200`:
 ```json
