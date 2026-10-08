@@ -85,6 +85,13 @@ class Patient(Base, ProvenanceMixin):
     # Synthea, to preserve the document's own identifier without pretending
     # it is a Synthea id.
     external_patient_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Clean demo-facing id ("P001") shown everywhere in the UI instead of
+    # the raw Synthea UUID in `id`. `id` remains the real internal/foreign
+    # key used by every other table (conditions.patient, knowledge_records
+    # .patient_id, patient_assignments.patient_id, etc.) — adding this
+    # column avoids remapping every FK in the schema just to get a readable
+    # display id (docs/CLEAN_DATASET.md).
+    display_id: Mapped[str | None] = mapped_column(String(20), unique=True, index=True, nullable=True)
 
     birthdate: Mapped[date | None] = mapped_column(Date)
     deathdate: Mapped[date | None] = mapped_column(Date)

@@ -21,3 +21,8 @@ class UploadResponse(BaseModel):
     status: str
     page_count: int
     message: str
+    # Display id ("P101"), never the raw internal UUID — None if nothing
+    # mappable identified a patient at all.
+    patient_id: str | None = None
+    records_created: int = 0
+    chunks_indexed: int = 0

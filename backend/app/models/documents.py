@@ -13,6 +13,12 @@ class SourceDocument(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     file_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    # Where the original PDF bytes were saved (relative to settings.upload_dir)
+    # — never returned to the frontend (section 56 "file storage": a
+    # citation can name the file, but the raw filesystem path stays
+    # internal). Lets a later source-inspection feature re-open the actual
+    # document instead of only ever having its extracted text.
+    storage_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_type: Mapped[str] = mapped_column(String(20), default="UPLOADED_PDF", nullable=False)
     document_type: Mapped[str | None] = mapped_column(String(50))
     patient_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)

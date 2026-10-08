@@ -118,10 +118,29 @@ def find_or_create_patient(db: Session, info: PatientInfo | None, source_documen
         last=info.last,
         source_type="UPLOADED_PDF",
         source_document_id=source_document_id,
+        display_id=_next_display_id(db),
     )
     db.add(patient)
     db.flush()
     return patient
+
+
+def _next_display_id(db: Session) -> str:
+    """The next free Pxxx — a genuinely new patient (not one of the clean
+    dataset's P001..P100) still gets a clean display id rather than
+    showing its raw UUID in the UI (docs/CLEAN_DATASET.md)."""
+    highest = (
+        db.query(Patient.display_id)
+        .filter(Patient.display_id.isnot(None))
+        .order_by(Patient.display_id.desc())
+        .first()
+    )
+    next_n = 1
+    if highest and highest[0]:
+        match = re.match(r"P(\d+)", highest[0])
+        if match:
+            next_n = int(match.group(1)) + 1
+    return f"P{next_n:03d}"
 
 
 def _add_knowledge_record(
@@ -158,11 +177,11 @@ def _add_knowledge_record(
     return kr_id
 
 
-def map_to_database(db: Session, data: PatientDocumentData, source_document_id: str) -> tuple[int, list[str]]:
+def map_to_database(db: Session, data: PatientDocumentData, source_document_id: str) -> tuple[int, list[str], Patient | None]:
     """Inserts every mappable item as a real row in the canonical tables,
     stamped with source_type=UPLOADED_PDF + source_document_id + source_page,
     and a matching knowledge_records row so it's immediately indexable.
-    Returns (records_created, new_knowledge_record_ids)."""
+    Returns (records_created, new_knowledge_record_ids, patient)."""
     patient = find_or_create_patient(db, data.patient, source_document_id)
     patient_id = patient.id if patient else None
     created = 0
@@ -327,4 +346,4 @@ def map_to_database(db: Session, data: PatientDocumentData, source_document_id: 
         created += 1
 
     db.commit()
-    return created, knowledge_record_ids
+    return created, knowledge_record_ids, patient

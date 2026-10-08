@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
@@ -61,6 +62,15 @@ async def upload_document(
     db.add(document)
     db.flush()
 
+    # Persist the original bytes — extraction only ever produced derived
+    # text/structured rows; without this the actual source document would
+    # be lost the moment the request finished (section 56 "file storage").
+    upload_dir = Path(settings.upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    storage_path = upload_dir / f"{document.id}.pdf"
+    storage_path.write_bytes(file_bytes)
+    document.storage_path = str(storage_path.relative_to(upload_dir))
+
     job = IngestionJob(id=new_uuid(), source_document_id=document.id, status="EXTRACTING", started_at=datetime.utcnow())
     db.add(job)
     db.flush()
@@ -69,7 +79,7 @@ async def upload_document(
     normalized = extract_patient_document_data(result)
 
     try:
-        records_created, knowledge_record_ids = map_to_database(db, normalized, document.id)
+        records_created, knowledge_record_ids, patient = map_to_database(db, normalized, document.id)
     except Exception as exc:  # defend against a malformed mapping, not a reason to lose the upload
         job.status = "FAILED"
         job.error_message = str(exc)
@@ -108,4 +118,7 @@ async def upload_document(
             f"Extracted {result.page_count} page(s); mapped {records_created} structured record(s); "
             f"indexed {chunks_indexed} knowledge chunk(s) into Qdrant."
         ),
+        patient_id=(patient.display_id or patient.id) if patient else None,
+        records_created=records_created,
+        chunks_indexed=chunks_indexed,
     )
