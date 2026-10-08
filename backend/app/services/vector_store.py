@@ -73,6 +73,17 @@ class VectorStore:
             score_threshold=score_threshold or None,
         )
 
+    def retrieve_by_ids(self, ids: list[str]) -> list:
+        """Direct point lookup by id — O(k) regardless of collection size,
+        unlike search()/scroll() which scan the whole collection under
+        qdrant-client's embedded local mode (no real payload indexes there;
+        see docs/DECISIONS.md). Used by app.rag.pipeline's patient-scoped
+        fast path to avoid a full-collection scan when the candidate set is
+        already known from a fast, indexed SQL query."""
+        if not ids:
+            return []
+        return self.client.retrieve(collection_name=self.collection, ids=ids, with_vectors=True)
+
 
 def match_value_or_any(field: str, values: list[str]) -> FieldCondition:
     if len(values) == 1:

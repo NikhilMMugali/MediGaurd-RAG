@@ -17,7 +17,8 @@
 - [ ] Query routing / domain classification (spec section 17) — not implemented; currently the authorization filter alone determines the retrievable set, semantic similarity determines relevance within it
 
 ## Known gaps to revisit (tracked in progress/DECISIONS.md and PROGRESS.md)
-- [ ] LLM calls fall back to a non-hallucinating extractive mode (top chunk, verbatim, cited) when no `GROQ_API_KEY`/`OPENAI_API_KEY`/`LLM_API_KEY` is set — add a real key before the final demo for more fluent multi-source answers
+- [x] LLM calls fall back to a non-hallucinating extractive mode when no key is configured — `GROQ_API_KEY` now set, real generation is the normal path; fallback (`DevModeProvider`) only appears with an explicit "unavailable" message if the key is missing or the call fails
+- [ ] Backfill `observation_category`/`record_date` into *existing* Qdrant payloads (currently only in SQL `knowledge_records`) so the general (no-patient-selected) retrieval path also gets category-aware filtering — `set_payload`, not a re-embed; low priority since the primary UX path always selects a patient first
 - [ ] Qdrant embedded-local mode holds a file lock on `QDRANT_PATH` — only one process (API server or a script) can have it open at a time; fine for a single-demo-box setup, would need `QDRANT_MODE=server` for anything concurrent
 - [ ] Smarter PDF extraction (current mapper is a rule-based "Label: Value" line parser; fine for the spec's sample document format, not for free-form scanned prose)
 - [ ] `document_acls` is modeled but not yet populated or enforced anywhere — current authorization runs entirely on role + record_type/sensitivity + patient_assignments, which already covers every acceptance test; document-level ACLs would add per-document overrides on top of that if needed later

@@ -6,7 +6,6 @@ from app.authorization.context import build_authorization_context
 from app.db.session import get_db
 from app.models.hospital import Condition, Encounter, Medication, Patient
 from app.models.user import User
-from app.rag.pipeline import retrieve_authorized_sources
 from app.schemas.admin import PatientSummary
 from app.schemas.patients import PatientListResponse, PatientStatusResponse
 from app.schemas.rag import CitationResponse
@@ -69,44 +68,51 @@ def get_patient_status(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PatientStatusResponse:
-    """A conservative, evidence-based status derived from the SAME
-    authorization-aware retrieval used by /api/rag/query — never a second,
-    independent "status AI" and never frontend-invented. If retrieval is
-    denied or finds nothing authorized, the status is "No Recent
-    Information", not a guess. Classification is deterministic (did an
-    authorized 'condition' record come back for this patient?) rather than
-    free-form LLM text, so it can never drift into an unsupported severity
-    claim like "Critical"."""
-    outcome = retrieve_authorized_sources(
-        db, user, "current clinical status and recent conditions", patient_id=patient_id
-    )
+    """A conservative, evidence-based status using the SAME authorization
+    rules the RAG pipeline applies (role-allowed record types + real
+    patient_assignments scope) — never a second, independent "status AI"
+    and never frontend-invented.
 
-    if outcome.status != "OK":
+    Deliberately does NOT go through embeddings/Qdrant: this is a plain,
+    deterministic "does an authorized condition row exist" check, so it
+    answers in milliseconds via an indexed SQL query rather than paying an
+    embedding-model + full-collection vector search on every dashboard
+    card. See progress/DECISIONS.md — the dashboard was previously firing
+    one RAG query per visible patient, which is what made it slow; the
+    chat endpoint (which genuinely needs semantic retrieval) is unaffected."""
+    ctx = build_authorization_context(db, user)
+
+    patient_authorized = ctx.assigned_patient_ids is None or patient_id in ctx.assigned_patient_ids
+    role_sees_conditions = "condition" in ctx.allowed_record_types
+
+    if not patient_authorized or not role_sees_conditions:
         return PatientStatusResponse(
             patient_id=patient_id,
             status="No Recent Information",
-            summary=outcome.denial_answer or "No authorized recent information is available.",
+            summary="No authorized recent information is available.",
             citations=[],
         )
 
-    has_condition = any(s.get("record_type") == "condition" for s in outcome.sources)
-    patient_status = "Attention" if has_condition else "Stable"
+    condition = db.query(Condition).filter(Condition.patient == patient_id).first()
+    patient_status = "Attention" if condition else "Stable"
     summary = (
         "Authorized records include a documented condition for this patient."
-        if has_condition
+        if condition
         else "Authorized records available to your role do not show a condition requiring attention."
     )
-
-    citations = [
-        CitationResponse(
-            source_id=f"SOURCE_{i+1}",
-            source_type=s["source_type"],
-            record_id=s.get("knowledge_record_id"),
-            file_name=s.get("source_document_id"),
-            page=s.get("source_page"),
-            section=s.get("source_section") or s.get("record_type"),
-        )
-        for i, s in enumerate(outcome.sources[:2])
-    ]
+    citations = (
+        [
+            CitationResponse(
+                source_id="SOURCE_1",
+                source_type=condition.source_type,
+                record_id=condition.id,
+                file_name=condition.source_document_id,
+                page=None,
+                section="condition",
+            )
+        ]
+        if condition
+        else []
+    )
 
     return PatientStatusResponse(patient_id=patient_id, status=patient_status, summary=summary, citations=citations)

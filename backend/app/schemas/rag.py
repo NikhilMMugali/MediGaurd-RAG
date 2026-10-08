@@ -18,6 +18,10 @@ class CitationResponse(BaseModel):
     file_name: str | None = None
     page: int | None = None
     section: str | None = None
+    # The record's own event date (ISO date string), when known — lets the
+    # frontend show "Observation record · 12 Sep 2026" instead of a raw
+    # UUID (docs/DECISIONS.md "RAG quality fix").
+    date: str | None = None
 
 
 class RagQueryResponse(BaseModel):

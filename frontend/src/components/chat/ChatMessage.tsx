@@ -8,9 +8,17 @@ interface ChatMessageProps {
   citations?: Citation[];
 }
 
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
 function citationLabel(c: Citation): string {
   if (c.file_name) return `${c.file_name}${c.page ? ` — Page ${c.page}` : ""}${c.section ? ` — ${c.section}` : ""}`;
-  return `${c.section ?? c.source_type.toLowerCase()} — record ${c.record_id ?? "?"}`;
+  const kind = c.section ?? c.source_type.toLowerCase();
+  const label = kind.charAt(0).toUpperCase() + kind.slice(1).replace(/_/g, " ");
+  return c.date ? `${label} record · ${formatDate(c.date)}` : `${label} record`;
 }
 
 export default function ChatMessage({ role, text, status, citations }: ChatMessageProps) {

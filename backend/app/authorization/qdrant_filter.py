@@ -10,9 +10,13 @@ from app.authorization.context import AuthorizationContext
 from app.services.vector_store import match_value_or_any
 
 
-def build_retrieval_filter(ctx: AuthorizationContext) -> Filter:
+def build_retrieval_filter(ctx: AuthorizationContext, record_types: list[str] | None = None) -> Filter:
+    # record_types, when given, is query-classification's narrowing of what
+    # the role is allowed to see (app.rag.query_classification) — it is
+    # always already intersected with ctx.allowed_record_types by the
+    # caller, never a widening of it.
     must = [
-        match_value_or_any("record_type", ctx.allowed_record_types),
+        match_value_or_any("record_type", record_types if record_types is not None else ctx.allowed_record_types),
         match_value_or_any("sensitivity", ctx.allowed_sensitivity),
     ]
     if ctx.assigned_patient_ids is not None:

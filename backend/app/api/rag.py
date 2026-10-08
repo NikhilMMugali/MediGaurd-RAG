@@ -29,6 +29,7 @@ def rag_query(
                 file_name=c.file_name,
                 page=c.page,
                 section=c.section,
+                date=c.date,
             )
             for c in result.citations
         ],

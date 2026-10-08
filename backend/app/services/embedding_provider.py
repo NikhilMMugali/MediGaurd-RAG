@@ -23,6 +23,15 @@ class EmbeddingProvider:
 
 class SentenceTransformersProvider(EmbeddingProvider):
     def __init__(self, model_name: str):
+        import os
+
+        # Once the model is cached locally, every subsequent load otherwise
+        # still makes several HEAD/GET round-trips to huggingface.co just to
+        # check for updates (visible in the logs as 10-40s of network calls
+        # before the model actually loads). Skip that network dependency —
+        # we always want the model that was cached at install time anyway.
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
         from sentence_transformers import SentenceTransformer
 
         self._model = SentenceTransformer(model_name)

@@ -22,6 +22,8 @@ def record_to_payload(record: KnowledgeRecord) -> dict:
         "department_id": record.department_id,
         "sensitivity": record.sensitivity,
         "content": record.content,
+        "observation_category": record.observation_category,
+        "record_date": record.record_date.isoformat() if record.record_date else None,
     }
 
 

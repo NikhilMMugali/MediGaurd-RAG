@@ -19,6 +19,7 @@ export interface Citation {
   file_name: string | null;
   page: number | null;
   section: string | null;
+  date: string | null;
 }
 
 export type RagStatus = "ANSWERED" | "DENIED" | "NO_AUTHORIZED_CONTEXT";

@@ -4,7 +4,10 @@ generation"). Phase 2 scope: produce the text and provenance only — no
 embeddings and no Qdrant writes here (that's Phase 3).
 
 Each generator returns a dict shaped for KnowledgeRecord: patient_id,
-record_type, record_id, source_type, content, sensitivity.
+record_type, record_id, source_type, content, sensitivity, record_date
+(the event's own date, for recency-aware retrieval — see
+app.rag.query_classification) and, for observations only,
+observation_category.
 """
 from app.models.hospital import Claim, ClaimTransaction, Condition, Encounter, Medication, Observation
 
@@ -20,6 +23,7 @@ def from_condition(row: Condition) -> dict:
         "record_id": row.id,
         "source_type": row.source_type,
         "sensitivity": CLINICAL,
+        "record_date": row.start,
         "content": (
             f"Patient: {row.patient}\n"
             f"Record Type: Condition\n"
@@ -37,6 +41,7 @@ def from_medication(row: Medication) -> dict:
         "record_id": row.id,
         "source_type": row.source_type,
         "sensitivity": CLINICAL,
+        "record_date": row.start,
         "content": (
             f"Patient: {row.patient}\n"
             f"Record Type: Medication\n"
@@ -54,9 +59,12 @@ def from_observation(row: Observation) -> dict:
         "record_id": row.id,
         "source_type": row.source_type,
         "sensitivity": CLINICAL,
+        "record_date": row.date,
+        "observation_category": row.category,
         "content": (
             f"Patient: {row.patient}\n"
             f"Record Type: Observation\n"
+            f"Category: {row.category or 'unspecified'}\n"
             f"Observation: {row.description}\n"
             f"Value: {row.value} {row.units or ''}\n"
             f"Date: {row.date}"
@@ -71,6 +79,7 @@ def from_encounter(row: Encounter) -> dict:
         "record_id": row.id,
         "source_type": row.source_type,
         "sensitivity": OPERATIONAL,
+        "record_date": row.start,
         "content": (
             f"Patient: {row.patient}\n"
             f"Record Type: Encounter\n"
@@ -90,6 +99,7 @@ def from_claim(row: Claim) -> dict:
         "record_id": row.id,
         "source_type": row.source_type,
         "sensitivity": FINANCE,
+        "record_date": row.servicedate,
         "content": (
             f"Patient: {row.patientid}\n"
             f"Record Type: Claim\n"
@@ -107,6 +117,7 @@ def from_claim_transaction(row: ClaimTransaction) -> dict:
         "record_id": row.id,
         "source_type": row.source_type,
         "sensitivity": FINANCE,
+        "record_date": row.fromdate,
         "content": (
             f"Patient: {row.patientid}\n"
             f"Record Type: Claim Transaction\n"

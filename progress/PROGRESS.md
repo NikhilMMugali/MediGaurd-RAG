@@ -54,16 +54,24 @@ Vite + React + TypeScript + Tailwind CSS v3 + hand-written shadcn-style componen
 ## Known Issues
 - GitHub push still blocked: both tokens provided so far got a 403 ("Permission ... denied to NikhilMMugali") — token likely needs `repo` scope (classic) or explicit repository + Contents:Read-and-write access (fine-grained). Everything is committed locally and ready the instant a working token is provided.
 - PostgreSQL 16 finished installing via Homebrew (background job completed) but the project has not been switched over yet — still running on SQLite + embedded Qdrant. Not blocking; do before the final demo per the original Phase 2 plan.
-- The extractive LLM fallback (no API key configured) sometimes returns an authorized-but-not-very-relevant answer when the authorized domain doesn't semantically match the question (e.g., Finance asking a clinical-sounding question gets the top authorized *claim* record back, not a "not relevant" message) — this is a quality issue, not a security issue: it never crosses the authorization boundary, it just doesn't know to say "I found authorized records but none seem relevant." Worth adding a relevance threshold or a real LLM key before the demo for better-sounding answers.
 - `backend/data/qdrant` and `frontend/node_modules`, `frontend/dist` are gitignored (build/test artifacts, not source).
+- The general (no-patient-selected) retrieval path narrows by record type via query classification but not by observation category — that metadata lives only in SQL `knowledge_records`, not yet backfilled into existing Qdrant payloads. Not a problem for the primary UX path (patient always selected first), see progress/DECISIONS.md.
+
+## RAG quality fix (2026-10-08)
+Fixed the "answers look like raw database dumps" complaint end to end:
+- Real LLM generation (Groq, `openai/gpt-oss-120b`) replaces the extractive fallback as the normal path; the fallback (renamed `DevModeProvider`) now only ever appears with an explicit `[DEV MODE] ... unavailable` message, never disguised as a real answer.
+- Deterministic query classification (`app/rag/query_classification.py`) narrows retrieval to the record type(s)/observation-category the question is actually about, always intersected with — never widening — the role's authorization.
+- Recency-aware ranking: `knowledge_records.record_date`/`observation_category` (backfilled for all 176k existing rows) let "recent observations" blend relevance with how recent a record actually is, instead of pure cosine similarity pulling in an old, unrelated-but-similar-worded row.
+- Citations resolve the real file name and record date instead of a raw UUID.
+- Full before/after and the 10-point focused verification are in progress/DECISIONS.md's "RAG quality fix" entry.
 
 ## Latest Commit
 (pending — see Next Task)
 
 ## Next Task
-1. Commit and push the frontend once a working GitHub token is available.
+1. Commit and push both the earlier performance fix and this RAG quality fix once a working GitHub token is available.
 2. Manual click-through in an actual browser before the jury demo (login per role, patient click → chat, upload → immediately queryable, role-switch denial).
-3. Optional: admin retrieval-debug panel UI, ingestion status polling, a relevance threshold on retrieval, switch to real PostgreSQL.
+3. Optional: admin retrieval-debug panel UI, ingestion status polling, switch to real PostgreSQL, backfill observation_category into existing Qdrant payloads for the general (no-patient) retrieval path.
 
 ## Last Updated
 2026-10-08

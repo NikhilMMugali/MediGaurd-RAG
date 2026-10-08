@@ -48,6 +48,18 @@ class KnowledgeRecord(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     department_id: Mapped[str | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
     sensitivity: Mapped[str] = mapped_column(String(20), default="clinical", nullable=False)
+    # The clinical/financial event date the record is actually about (e.g.
+    # Observation.date, Condition.start) — distinct from created_at, which is
+    # only when this row was ingested. Lets retrieval rank "recent" queries
+    # by what the record describes, not by ingestion order (see
+    # app.rag.query_classification).
+    record_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    # Only populated for record_type == "observation" (Synthea's own
+    # category: vital-signs, laboratory, survey, social-history, exam,
+    # imaging, procedure, therapy). Lets a "recent observations" query from
+    # a clinical role prefer vitals/labs over unrelated social-history
+    # survey responses without discarding the latter for other queries.
+    observation_category: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
