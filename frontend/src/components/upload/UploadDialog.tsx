@@ -2,6 +2,7 @@ import * as React from "react";
 import { Upload } from "lucide-react";
 import { uploadDocument } from "@/api/documents";
 import { ApiError } from "@/api/client";
+import type { UploadResponse } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
@@ -15,22 +16,23 @@ interface UploadDialogProps {
 export default function UploadDialog({ onIndexed }: UploadDialogProps) {
   const [open, setOpen] = React.useState(false);
   const [stage, setStage] = React.useState<Stage>("idle");
-  const [message, setMessage] = React.useState<string | null>(null);
+  const [result, setResult] = React.useState<UploadResponse | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
 
   async function handleUpload() {
     const file = fileRef.current?.files?.[0];
     if (!file) return;
     setStage("uploading");
-    setMessage(null);
+    setError(null);
     try {
-      const result = await uploadDocument(file);
+      const uploaded = await uploadDocument(file);
       setStage("done");
-      setMessage(result.message);
-      onIndexed(null);
+      setResult(uploaded);
+      onIndexed(uploaded.patient_id);
     } catch (err) {
       setStage("error");
-      setMessage(err instanceof ApiError ? err.message : "Upload failed. Please try again.");
+      setError(err instanceof ApiError ? err.message : "Upload failed. Please try again.");
     }
   }
 
@@ -41,7 +43,8 @@ export default function UploadDialog({ onIndexed }: UploadDialogProps) {
         setOpen(next);
         if (!next) {
           setStage("idle");
-          setMessage(null);
+          setResult(null);
+          setError(null);
         }
       }}
     >
@@ -73,14 +76,27 @@ export default function UploadDialog({ onIndexed }: UploadDialogProps) {
             </div>
           )}
 
-          {stage === "done" && (
+          {stage === "done" && result && (
             <div className="rounded-md border bg-emerald-50 p-3 text-sm text-emerald-800">
               <p className="font-medium">Document ready</p>
-              <p className="mt-1 text-emerald-700">{message}</p>
+              <dl className="mt-2 grid grid-cols-2 gap-y-1 text-emerald-700">
+                {result.patient_id && (
+                  <>
+                    <dt className="text-emerald-600">Patient</dt>
+                    <dd>{result.patient_id}</dd>
+                  </>
+                )}
+                <dt className="text-emerald-600">Records created</dt>
+                <dd>{result.records_created}</dd>
+                <dt className="text-emerald-600">Knowledge chunks</dt>
+                <dd>{result.chunks_indexed}</dd>
+                <dt className="text-emerald-600">Vector index</dt>
+                <dd>{result.chunks_indexed > 0 ? "Ready" : "Deferred"}</dd>
+              </dl>
             </div>
           )}
 
-          {stage === "error" && <p className="text-sm text-destructive">{message}</p>}
+          {stage === "error" && <p className="text-sm text-destructive">{error}</p>}
 
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setOpen(false)}>

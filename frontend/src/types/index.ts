@@ -20,6 +20,7 @@ export interface Citation {
   page: number | null;
   section: string | null;
   date: string | null;
+  patient_id: string | null;
 }
 
 export type RagStatus = "ANSWERED" | "DENIED" | "NO_AUTHORIZED_CONTEXT";
@@ -53,6 +54,9 @@ export interface UploadResponse {
   status: string;
   page_count: number;
   message: string;
+  patient_id: string | null;
+  records_created: number;
+  chunks_indexed: number;
 }
 
 export interface DatabaseStats {
@@ -66,4 +70,25 @@ export interface DatabaseStats {
   claims: number;
   claims_transactions: number;
   knowledge_records: number;
+  documents: number;
+  vectors: number;
+}
+
+export interface RecentUpload {
+  file_name: string;
+  status: string;
+  created_at: string;
+  patient_id: string | null;
+}
+
+export interface RecentSecurityEvent {
+  status: string;
+  role: string | null;
+  timestamp: string;
+  reason: string | null;
+}
+
+export interface RecentActivity {
+  recent_uploads: RecentUpload[];
+  recent_security_events: RecentSecurityEvent[];
 }

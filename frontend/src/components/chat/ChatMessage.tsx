@@ -1,3 +1,5 @@
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Badge } from "@/components/ui/badge";
 import type { Citation, RagStatus } from "@/types";
 
@@ -14,51 +16,92 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
-function citationLabel(c: Citation): string {
-  if (c.file_name) return `${c.file_name}${c.page ? ` — Page ${c.page}` : ""}${c.section ? ` — ${c.section}` : ""}`;
+function citationKind(c: Citation): string {
   const kind = c.section ?? c.source_type.toLowerCase();
-  const label = kind.charAt(0).toUpperCase() + kind.slice(1).replace(/_/g, " ");
-  return c.date ? `${label} record · ${formatDate(c.date)}` : `${label} record`;
+  return kind.charAt(0).toUpperCase() + kind.slice(1).replace(/_/g, " ");
+}
+
+interface GroupedCitation {
+  ids: string[];
+  label: string;
+}
+
+// Several sources from the same record type on the same date (e.g. five
+// vitals read off one observation date) collapse into one line rather than
+// five identical-looking rows — detail is still in each source_id's own
+// badge (section 45 "source grouping").
+function groupCitations(citations: Citation[]): GroupedCitation[] {
+  const groups = new Map<
+    string,
+    { ids: string[]; kind: string; date: string | null; patientId: string | null; fileName: string | null; page: number | null }
+  >();
+  for (const c of citations) {
+    if (c.file_name) {
+      const key = `file:${c.file_name}:${c.page ?? ""}:${c.section ?? ""}`;
+      const existing = groups.get(key);
+      if (existing) existing.ids.push(c.source_id);
+      else groups.set(key, { ids: [c.source_id], kind: citationKind(c), date: null, patientId: null, fileName: c.file_name, page: c.page });
+      continue;
+    }
+    const key = `db:${c.section ?? c.source_type}:${c.date ?? ""}:${c.patient_id ?? ""}`;
+    const existing = groups.get(key);
+    if (existing) existing.ids.push(c.source_id);
+    else groups.set(key, { ids: [c.source_id], kind: citationKind(c), date: c.date, patientId: c.patient_id, fileName: null, page: null });
+  }
+
+  return Array.from(groups.values()).map((g) => {
+    const kind = g.ids.length > 1 ? `${g.kind}s` : g.kind;
+    if (g.fileName) {
+      return { ids: g.ids, label: `${g.fileName}${g.page ? ` — Page ${g.page}` : ""}` };
+    }
+    // "Condition record · P001 · 14 Mar 2026" — patient id included since a
+    // summary/multi-patient answer can mix sources from more than one.
+    const parts = [`${kind} record`, g.patientId, g.date ? formatDate(g.date) : null].filter(Boolean);
+    return { ids: g.ids, label: parts.join(" · ") };
+  });
 }
 
 export default function ChatMessage({ role, text, status, citations }: ChatMessageProps) {
   if (role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">{text}</div>
+        <div className="max-w-[75%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">{text}</div>
       </div>
     );
   }
 
   const isRestricted = status === "DENIED";
   const isEmpty = status === "NO_AUTHORIZED_CONTEXT";
+  const grouped = citations && citations.length > 0 ? groupCitations(citations) : [];
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2.5 md:max-w-[85%]">
       <div
         className={
           isRestricted
-            ? "max-w-[85%] rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm"
+            ? "rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5 text-sm"
             : isEmpty
-              ? "max-w-[85%] rounded-lg border bg-muted/50 px-3 py-2 text-sm text-muted-foreground"
-              : "max-w-[85%] rounded-lg border bg-card px-3 py-2 text-sm"
+              ? "rounded-lg border bg-muted/50 px-3.5 py-2.5 text-sm text-muted-foreground"
+              : "rounded-lg border bg-card px-3.5 py-2.5 text-sm"
         }
       >
         {isRestricted && <p className="mb-1 text-xs font-semibold uppercase text-destructive">Access restricted</p>}
         {isEmpty && <p className="mb-1 text-xs font-semibold uppercase text-muted-foreground">No authorized information found</p>}
-        <p className="whitespace-pre-wrap">{text}</p>
+        <div className="prose-chat">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+        </div>
       </div>
 
-      {citations && citations.length > 0 && (
-        <div className="max-w-[85%] rounded-lg border bg-muted/30 px-3 py-2">
-          <p className="mb-1.5 text-xs font-semibold text-muted-foreground">Sources</p>
+      {grouped.length > 0 && (
+        <div className="px-1">
+          <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Sources</p>
           <ul className="flex flex-col gap-1">
-            {citations.map((c) => (
-              <li key={c.source_id} className="flex items-center gap-2 text-xs text-muted-foreground">
+            {grouped.map((g) => (
+              <li key={g.ids.join(",")} className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                  {c.source_id.replace("SOURCE_", "")}
+                  {g.ids.map((id) => id.replace("SOURCE_", "")).join(",")}
                 </Badge>
-                {citationLabel(c)}
+                {g.label}
               </li>
             ))}
           </ul>

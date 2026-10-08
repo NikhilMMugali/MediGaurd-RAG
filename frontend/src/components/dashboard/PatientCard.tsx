@@ -19,9 +19,7 @@ export default function PatientCard({ patientId, status, onOpen }: PatientCardPr
   return (
     <Card className="flex flex-col justify-between">
       <CardContent className="pt-4">
-        <p className="truncate font-mono text-sm font-medium" title={patientId}>
-          {patientId.length > 12 ? `${patientId.slice(0, 8)}…` : patientId}
-        </p>
+        <p className="text-sm font-medium">{patientId}</p>
         {status ? (
           <Badge variant={STATUS_VARIANT[status]} className="mt-2">
             {status}

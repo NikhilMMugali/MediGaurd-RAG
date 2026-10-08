@@ -59,7 +59,14 @@ export default function PatientsPanel({ onSelectPatient }: PatientsPanelProps) {
           <h2 className="text-lg font-semibold">Your Patients</h2>
           <p className="text-sm text-muted-foreground">{total}</p>
         </div>
-        {CAN_UPLOAD.includes(user.role) && <UploadDialog onIndexed={() => setRefreshKey((k) => k + 1)} />}
+        {CAN_UPLOAD.includes(user.role) && (
+          <UploadDialog
+            onIndexed={(patientId) => {
+              setRefreshKey((k) => k + 1);
+              if (patientId) onSelectPatient(patientId);
+            }}
+          />
+        )}
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}

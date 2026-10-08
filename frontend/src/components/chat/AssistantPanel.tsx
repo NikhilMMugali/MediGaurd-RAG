@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Send, X } from "lucide-react";
+import { Loader2, Send, X } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
 import { queryRag } from "@/api/rag";
 import { ApiError } from "@/api/client";
@@ -60,7 +60,7 @@ export default function AssistantPanel({ patientId, onClearPatient }: AssistantP
         <h2 className="text-sm font-semibold">{ROLE_ASSISTANT_NAME[user.role]}</h2>
         {patientId && (
           <Badge variant="secondary" className="gap-1.5">
-            Patient: {patientId.length > 12 ? `${patientId.slice(0, 8)}…` : patientId}
+            Patient: {patientId}
             <button onClick={onClearPatient} aria-label="Clear patient context">
               <X className="h-3 w-3" />
             </button>
@@ -86,7 +86,12 @@ export default function AssistantPanel({ patientId, onClearPatient }: AssistantP
           {messages.map((m, i) => (
             <ChatMessage key={i} role={m.role} text={m.text} status={m.status} citations={m.citations} />
           ))}
-          {isLoading && <p className="text-sm text-muted-foreground">MediGaurd is retrieving authorized information...</p>}
+          {isLoading && (
+            <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              MediGaurd is thinking...
+            </p>
+          )}
         </div>
         <div ref={bottomRef} />
       </div>
@@ -101,7 +106,7 @@ export default function AssistantPanel({ patientId, onClearPatient }: AssistantP
         <Textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={ROLE_PLACEHOLDER[user.role]}
+          placeholder={patientId ? `Ask about ${patientId}...` : ROLE_PLACEHOLDER[user.role]}
           className="min-h-[40px] resize-none"
           rows={1}
           onKeyDown={(e) => {

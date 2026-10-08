@@ -28,11 +28,11 @@ export const ROLE_PLACEHOLDER: Record<Role, string> = {
 };
 
 export const ROLE_QUICK_PROMPTS: Record<Role, string[]> = {
-  DOCTOR: ["Latest clinical information", "Current medications", "Recent observations"],
-  NURSE: ["Recent observations", "Medications", "Assigned patient information"],
-  FINANCE: ["Outstanding balance", "Claim status", "Payer information"],
-  RECEPTION: ["Latest encounter", "Encounter history", "Operational information"],
-  ADMIN: ["Patient information", "Claims", "Clinical information"],
+  DOCTOR: ["Recent observations", "Current medications", "What conditions does this patient have?", "Last visit"],
+  NURSE: ["Recent observations", "Current medications", "Last visit"],
+  FINANCE: ["What is the outstanding amount?", "Which payer is associated with this patient?"],
+  RECEPTION: ["Last visit", "Encounter history"],
+  ADMIN: ["What is the patient's name, age and gender?", "Recent observations", "Outstanding amount"],
 };
 
 // Demo-only convenience (never a security mechanism — the backend still
