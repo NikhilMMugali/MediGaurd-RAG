@@ -30,6 +30,7 @@ def rag_query(
                 page=c.page,
                 section=c.section,
                 date=c.date,
+                patient_id=c.patient_id,
             )
             for c in result.citations
         ],

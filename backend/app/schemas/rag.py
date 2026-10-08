@@ -22,6 +22,9 @@ class CitationResponse(BaseModel):
     # frontend show "Observation record · 12 Sep 2026" instead of a raw
     # UUID (docs/DECISIONS.md "RAG quality fix").
     date: str | None = None
+    # The patient's clean display id ("P001"), never the raw internal UUID
+    # (docs/CLEAN_DATASET.md).
+    patient_id: str | None = None
 
 
 class RagQueryResponse(BaseModel):

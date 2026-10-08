@@ -9,7 +9,7 @@ record_type, record_id, source_type, content, sensitivity, record_date
 app.rag.query_classification) and, for observations only,
 observation_category.
 """
-from app.models.hospital import Claim, ClaimTransaction, Condition, Encounter, Medication, Observation
+from app.models.hospital import Allergy, Claim, ClaimTransaction, Condition, Encounter, Medication, Observation, Procedure
 
 CLINICAL = "clinical"
 FINANCE = "finance"
@@ -68,6 +68,44 @@ def from_observation(row: Observation) -> dict:
             f"Observation: {row.description}\n"
             f"Value: {row.value} {row.units or ''}\n"
             f"Date: {row.date}"
+        ),
+    }
+
+
+def from_allergy(row: Allergy) -> dict:
+    reactions = ", ".join(r for r in (row.description1, row.description2) if r)
+    return {
+        "patient_id": row.patient,
+        "record_type": "allergy",
+        "record_id": row.id,
+        "source_type": row.source_type,
+        "sensitivity": CLINICAL,
+        "record_date": row.start,
+        "content": (
+            f"Patient: {row.patient}\n"
+            f"Record Type: Allergy\n"
+            f"Allergy: {row.description}\n"
+            f"Category: {row.category or 'unspecified'}\n"
+            + (f"Reaction: {reactions}\n" if reactions else "")
+            + f"Start: {row.start}\n"
+            f"Stop: {row.stop or 'ongoing'}"
+        ),
+    }
+
+
+def from_procedure(row: Procedure) -> dict:
+    return {
+        "patient_id": row.patient,
+        "record_type": "procedure",
+        "record_id": row.id,
+        "source_type": row.source_type,
+        "sensitivity": CLINICAL,
+        "record_date": row.start,
+        "content": (
+            f"Patient: {row.patient}\n"
+            f"Record Type: Procedure\n"
+            f"Procedure: {row.description}\n"
+            f"Date: {row.start}"
         ),
     }
 
