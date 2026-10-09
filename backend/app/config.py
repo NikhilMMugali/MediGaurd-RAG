@@ -44,7 +44,14 @@ class Settings(BaseSettings):
     # "retrieval pipeline").
     rag_top_k: int = 8
     rag_context_k: int = 5
-    rag_score_threshold: float = 0.0
+    # Cosine similarity floor (embeddings are normalized — see
+    # services/embedding_provider.py) below which a retrieved chunk is
+    # treated as "not actually relevant" rather than attached as a citation.
+    # Was 0.0 — which combined with a since-fixed `or None` bug in
+    # VectorStore.search() meant no threshold was ever really applied, so an
+    # unrelated top-k chunk (wrong patient, wrong topic) was always shown as
+    # if it supported the answer (docs/DECISIONS.md "relevance floor").
+    rag_score_threshold: float = 0.35
 
     max_upload_size_mb: int = 20
     upload_dir: str = "./data/uploads"

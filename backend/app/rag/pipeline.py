@@ -43,6 +43,12 @@ _UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 # Clean demo-facing patient id ("P001") — what the UI actually shows and
 # sends; see Patient.display_id (docs/CLEAN_DATASET.md).
 _DISPLAY_ID_RE = re.compile(r"\bP\d{3,}\b", re.IGNORECASE)
+# A plausible person's name typed in free text ("tell me about Ramesh Shah")
+# — two to four consecutive capitalized words. Used only as a fallback when
+# no display id/UUID was found; matched against actual Patient rows below,
+# so a false-positive phrase here just fails to resolve, it never grants
+# access to anything on its own (docs/DECISIONS.md "name resolution").
+_NAME_PHRASE_RE = re.compile(r"\b([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+){1,3})\b")
 
 # How many SQL candidates the known-patient fast path pulls before ranking —
 # wide enough that metadata-filtered recent/relevant records are never
@@ -81,6 +87,14 @@ class Citation:
     section: str | None
     date: str | None = None
     patient_id: str | None = None  # display id ("P001"), never the raw UUID
+    # The actual retrieved text this citation is grounded in — lets the
+    # frontend's PDF viewer attempt to locate/highlight this exact passage
+    # on the cited page instead of only opening the page (section 10D).
+    evidence_text: str | None = None
+    # SourceDocument.id — lets the frontend fetch GET /api/documents/{id}/file
+    # to actually open the cited PDF. None for a Synthea-derived citation
+    # (file_name is also None in that case; there is no PDF to open).
+    document_id: str | None = None
 
 
 @dataclass
@@ -113,12 +127,41 @@ def resolve_patient_reference(db: Session, question: str, explicit_patient_id: s
         match = _DISPLAY_ID_RE.search(question) or _UUID_RE.search(question)
         candidate = match.group(0) if match else None
     if not candidate:
-        return None
+        return _resolve_patient_by_name(db, question)
 
     if _DISPLAY_ID_RE.fullmatch(candidate):
         patient = db.query(Patient).filter(Patient.display_id == candidate.upper()).first()
         return patient.id if patient else None
     return candidate
+
+
+def _resolve_patient_by_name(db: Session, question: str) -> str | None:
+    """Fallback when no Pxxx/UUID is present — resolves "tell me about
+    Ramesh Shah" to that patient's internal id by exact (normalized) full-
+    name match. This was previously missing entirely: a question naming a
+    patient by name, rather than by display id, silently fell through to an
+    unscoped semantic search with no patient filter at all (the root cause
+    behind an unrelated patient's records being shown as "sources" for a
+    completely different patient's question — see progress/DECISIONS.md).
+    Exact-match only, never fuzzy/substring — a wrong guess here just fails
+    to resolve (falls through to the normal "no context" handling), it can
+    never grant access to a patient the subsequent authorization check
+    wouldn't already allow."""
+    phrases = _NAME_PHRASE_RE.findall(question)
+    if not phrases:
+        return None
+
+    rows = db.query(Patient.id, Patient.first, Patient.last).filter(
+        Patient.first.isnot(None), Patient.last.isnot(None)
+    ).all()
+    by_name = {
+        re.sub(r"\s+", " ", f"{first} {last}").strip().lower(): pid for pid, first, last in rows if first and last
+    }
+    for phrase in sorted(set(phrases), key=len, reverse=True):
+        key = re.sub(r"\s+", " ", phrase).strip().lower()
+        if key in by_name:
+            return by_name[key]
+    return None
 
 
 def _display_id_for(db: Session, internal_patient_id: str) -> str:
@@ -281,6 +324,17 @@ def _retrieve_for_known_patient(
         scored.append((score, record))
 
     scored.sort(key=lambda pair: pair[0], reverse=True)
+    if not intent.is_recency:
+        # A recency query ("recent observations") is a structural request —
+        # the score here is dominated by recency_bonus, not topical
+        # similarity to the question text, so a relevance floor doesn't
+        # apply. For a plain content question, a candidate set that's all
+        # weakly-scored means none of this patient's own authorized records
+        # actually address the question — show "not enough information"
+        # rather than the top-k regardless of how weak (section 8D "do not
+        # attach the first five results simply because retrieval returned
+        # them").
+        scored = [pair for pair in scored if pair[0] >= settings.rag_score_threshold]
     top = [record for _, record in scored[: settings.rag_context_k]]
     return [_record_to_source(r) for r in top], debug
 
@@ -381,6 +435,7 @@ def _structured_sources_to_citations(db: Session, sources: list, display_id: str
             section=s.record_type,
             date=s.date,
             patient_id=display_id,
+            document_id=s.source_document_id,
         )
         for i, s in enumerate(sources)
     ]
@@ -473,6 +528,8 @@ def run_query(
             section=s.get("source_section") or s.get("record_type"),
             date=s.get("record_date"),
             patient_id=display_ids.get(s.get("patient_id")),
+            evidence_text=s.get("content"),
+            document_id=s.get("source_document_id"),
         )
         for i, s in enumerate(sources)
     ]

@@ -25,6 +25,12 @@ class CitationResponse(BaseModel):
     # The patient's clean display id ("P001"), never the raw internal UUID
     # (docs/CLEAN_DATASET.md).
     patient_id: str | None = None
+    # The actual retrieved text this citation is grounded in — lets the
+    # frontend's PDF viewer locate/highlight this passage on the cited page.
+    evidence_text: str | None = None
+    # SourceDocument.id — lets the frontend fetch GET /api/documents/{id}/file
+    # to open the cited PDF. None when the citation isn't PDF-backed.
+    document_id: str | None = None
 
 
 class RagQueryResponse(BaseModel):

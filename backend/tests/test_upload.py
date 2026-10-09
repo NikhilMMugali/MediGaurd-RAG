@@ -133,11 +133,14 @@ def test_uploader_can_query_the_newly_created_patient_afterward(client, seeded_d
     assert "Hypertension" in body["answer"]
 
 
-def test_upload_rejects_duplicate_file(client, seeded_doctor):
-    """Same bytes uploaded twice must be rejected as a duplicate by hash,
-    regardless of the filename used the second time. PyMuPDF stamps a fresh
-    random document ID on every tobytes() call, so the identical-content
-    bytes are generated once here and reused, rather than regenerated."""
+def test_upload_of_fully_indexed_duplicate_reports_already_available(client, seeded_doctor):
+    """Same bytes uploaded twice, by hash, regardless of the filename used
+    the second time. A duplicate whose first upload was fully indexed is no
+    longer a dead-end 409 — it's recognized as already-ready and the SAME
+    document_id is returned, not a second document (section 5 "duplicate
+    PDF uploads"). PyMuPDF stamps a fresh random document ID on every
+    tobytes() call, so the identical-content bytes are generated once here
+    and reused, rather than regenerated."""
     token = _login(client, seeded_doctor)
     headers = {"Authorization": f"Bearer {token}"}
     pdf_bytes = _make_pdf_bytes()
@@ -148,10 +151,56 @@ def test_upload_rejects_duplicate_file(client, seeded_doctor):
         headers=headers,
     )
     assert first.status_code == 200
+    first_body = first.json()
+    assert first_body["chunks_indexed"] > 0
 
     second = client.post(
         "/api/documents/upload",
         files={"file": ("patient_p999_again.pdf", pdf_bytes, "application/pdf")},
         headers=headers,
     )
-    assert second.status_code == 409
+    assert second.status_code == 200
+    second_body = second.json()
+    assert second_body["document_id"] == first_body["document_id"]
+    assert second_body["status"] == "COMPLETED"
+    assert second_body["chunks_indexed"] == first_body["chunks_indexed"]
+
+
+def test_upload_of_broken_duplicate_is_repaired_not_dead_ended(client, seeded_doctor, db_session):
+    """Regression for the exact reported bug: a document that was uploaded
+    once but never actually indexed (predates the narrative-fallback fix,
+    or a prior indexing failure) must not keep reporting a dead-end
+    "already uploaded, COMPLETED" on every re-upload — it should be repaired
+    in place and become genuinely queryable."""
+    from app.models.documents import KnowledgeRecord, SourceDocument
+    from app.models.provenance import new_uuid
+
+    token = _login(client, seeded_doctor)
+    headers = {"Authorization": f"Bearer {token}"}
+    pdf_bytes = _make_pdf_bytes("Lab report with no recognizable Label:Value fields at all.\nJust prose.")
+
+    broken = SourceDocument(
+        id=new_uuid(),
+        file_name="legacy_upload.pdf",
+        file_hash=__import__("hashlib").sha256(pdf_bytes).hexdigest(),
+        source_type="UPLOADED_PDF",
+        uploaded_by=seeded_doctor.id,
+        status="COMPLETED",
+    )
+    db_session.add(broken)
+    db_session.commit()
+    assert db_session.query(KnowledgeRecord).filter(KnowledgeRecord.source_document_id == broken.id).count() == 0
+
+    response = client.post(
+        "/api/documents/upload",
+        files={"file": ("legacy_upload.pdf", pdf_bytes, "application/pdf")},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["document_id"] == broken.id
+    assert body["status"] == "COMPLETED"
+    assert body["chunks_indexed"] > 0
+
+    repaired_count = db_session.query(KnowledgeRecord).filter(KnowledgeRecord.source_document_id == broken.id).count()
+    assert repaired_count == body["chunks_indexed"]

@@ -8,7 +8,19 @@ This is deliberately a simple "Label: Value" line parser rather than an LLM
 call — fast, free, and fully traceable for a hackathon demo, matching the
 sample document format in docs/DATA_FLOW.md. A smarter extractor can replace
 `extract_patient_document_data` later without touching the DB-mapping half.
-"""
+
+Two real-world gaps were found and fixed here (progress/DECISIONS.md "PDF
+retrieval fix"): (1) a document whose content doesn't match any of the
+structured Label:Value categories below — e.g. a lab report's test-result
+tables — previously produced zero knowledge_records and was therefore
+completely unretrievable despite a successful-looking upload; every page's
+text is now also kept as a generic narrative knowledge record regardless of
+what structured fields were recognized. (2) the per-line parser garbles a
+value when two fields share one physical line ("Name : X Reg. No. : Y",
+common in real lab-report headers) because it captures everything from the
+first colon to end-of-line; `_extract_identity_fallback` recovers a clean
+name/registration-id/gender from such lines via field-boundary-aware regexes
+instead."""
 import re
 
 from sqlalchemy.orm import Session
@@ -16,13 +28,14 @@ from sqlalchemy.orm import Session
 from app.models.documents import KnowledgeRecord
 from app.models.hospital import Allergy, Claim, Condition, Encounter, Medication, Patient, Procedure
 from app.models.provenance import new_uuid
-from app.schemas.ingestion import PdfExtractionResult
+from app.schemas.ingestion import ExtractedPage, PdfExtractionResult
 from app.schemas.pdf_normalization import (
     AllergyItem,
     ClaimItem,
     ConditionItem,
     EncounterItem,
     MedicationItem,
+    NarrativeSection,
     PatientDocumentData,
     PatientInfo,
     ProcedureItem,
@@ -30,7 +43,7 @@ from app.schemas.pdf_normalization import (
 
 _LABEL_LINE = re.compile(r"^\s*([A-Za-z][A-Za-z /]*?)\s*:\s*(.+?)\s*$")
 
-_PATIENT_ID_LABELS = {"patient", "patient id", "patient_id"}
+_PATIENT_ID_LABELS = {"patient", "patient id", "patient_id", "reg no", "reg. no", "registration no", "mrn"}
 _NAME_LABELS = {"name"}
 _CONDITION_LABELS = {"diagnosis", "condition", "conditions"}
 _MEDICATION_LABELS = {"medication", "medications"}
@@ -39,11 +52,57 @@ _PROCEDURE_LABELS = {"procedure", "procedures"}
 _ENCOUNTER_LABELS = {"encounter", "visit", "encounters"}
 _BILLING_LABELS = {"billing", "outstanding", "claim"}
 
+# Page-text is scanned per-page (not one joined blob) so a boundary keyword
+# on page N can never swallow a name that actually belongs to page N+1.
+_FIELD_BOUNDARY = r"(?:\n|Reg\.?\s*No\.?|Age\b|Gender\b|Ref\.?\s*By\b|Location\b|Tele\s*No\.?|$)"
+_NAME_FIELD_RE = re.compile(rf"\bName\s*:\s*(.+?)(?=\s*{_FIELD_BOUNDARY})", re.IGNORECASE)
+_REGNO_FIELD_RE = re.compile(r"\b(?:Reg\.?\s*No\.?|Registration\s*No\.?|MRN)\s*:?\s*([A-Za-z0-9\-]{4,})\b", re.IGNORECASE)
+_GENDER_FIELD_RE = re.compile(r"\bGender\s*:?\s*(Male|Female|Other)\b", re.IGNORECASE)
+
+# Page content kept as a narrative knowledge record is capped so one chunk
+# stays within a sensible embedding length; real lab-report pages are far
+# shorter than this in practice.
+_MAX_NARRATIVE_CHARS = 3000
+
+
+def _clean_identity_value(value: str) -> str | None:
+    """A genuinely clean extracted value is short and has no embedded
+    label-looking text — used to decide whether the naive per-line capture
+    (which took everything to end-of-line) is trustworthy as-is, or whether
+    the field-boundary-aware fallback should be preferred instead."""
+    value = re.sub(r"\s+", " ", value).strip(" :")
+    if not value or len(value) > 60 or ":" in value:
+        return None
+    return value
+
+
+def _extract_identity_fallback(pages: list[ExtractedPage]) -> tuple[str | None, str | None, str | None]:
+    """Field-boundary-aware fallback for a real-world header line that packs
+    more than one "Label: Value" pair onto a single physical line — returns
+    (name, registration_id, gender), any of which may be None. Purely
+    generic label matching; never keyed to any specific patient's name."""
+    for page in pages:
+        name_match = _NAME_FIELD_RE.search(page.text)
+        name = _clean_identity_value(name_match.group(1)) if name_match else None
+        if not name:
+            continue
+        regno_match = _REGNO_FIELD_RE.search(page.text)
+        gender_match = _GENDER_FIELD_RE.search(page.text)
+        return (
+            name,
+            regno_match.group(1) if regno_match else None,
+            gender_match.group(1).capitalize() if gender_match else None,
+        )
+    return None, None, None
+
 
 def extract_patient_document_data(extraction: PdfExtractionResult) -> PatientDocumentData:
-    """Scan "Label: Value" lines across every extracted page. Unrecognized
-    labels are left out rather than guessed; a page with no recognizable
-    label still contributes nothing but never raises."""
+    """Scan "Label: Value" lines across every extracted page for the
+    structured categories below. Unrecognized labels are left out rather
+    than guessed; a page with no recognizable label still contributes
+    nothing to the structured lists, but every page's own text is always
+    kept as a narrative knowledge record (see module docstring) so the
+    document remains semantically searchable either way."""
     data = PatientDocumentData()
     patient_id: str | None = None
     patient_name: str | None = None
@@ -78,13 +137,29 @@ def extract_patient_document_data(extraction: PdfExtractionResult) -> PatientDoc
                     outstanding = None
                 data.claims.append(ClaimItem(outstanding=outstanding, source_page=page.page_number))
 
-    if patient_id or patient_name:
-        first, _, last = (patient_name or "").partition(" ")
+    clean_name = _clean_identity_value(patient_name) if patient_name else None
+    gender: str | None = None
+    if not clean_name:
+        # The naive capture is missing or garbled (two fields shared one
+        # line) — recover a clean name/registration-id/gender generically.
+        fallback_name, fallback_regno, gender = _extract_identity_fallback(extraction.pages)
+        clean_name = fallback_name
+        if fallback_regno and not patient_id:
+            patient_id = fallback_regno
+
+    if patient_id or clean_name:
+        first, _, last = (clean_name or "").partition(" ")
         data.patient = PatientInfo(
             external_patient_id=patient_id,
             first=first or None,
             last=last or None,
+            gender=gender,
         )
+
+    for page in extraction.pages:
+        text = re.sub(r"[ \t]+", " ", page.text).strip()
+        if text:
+            data.narrative_sections.append(NarrativeSection(content=text[:_MAX_NARRATIVE_CHARS], source_page=page.page_number))
 
     return data
 
@@ -120,6 +195,7 @@ def find_or_create_patient(db: Session, info: PatientInfo | None, source_documen
         external_patient_id=info.external_patient_id,
         first=info.first,
         last=info.last,
+        gender=info.gender,
         source_type="UPLOADED_PDF",
         source_document_id=source_document_id,
         display_id=_next_display_id(db),
@@ -152,7 +228,7 @@ def _add_knowledge_record(
     *,
     patient_id: str | None,
     record_type: str,
-    record_id: str,
+    record_id: str | None,
     sensitivity: str,
     content: str,
     source_document_id: str,
@@ -179,6 +255,13 @@ def _add_knowledge_record(
         )
     )
     return kr_id
+
+
+def narrative_sections_for_document(result: PdfExtractionResult) -> list[NarrativeSection]:
+    """Thin wrapper so app.api.upload's duplicate-repair path can regenerate
+    just the narrative knowledge records (never the structured rows, which
+    are not idempotent to re-insert) without re-running the full extractor."""
+    return extract_patient_document_data(result).narrative_sections
 
 
 def map_to_database(
@@ -350,6 +433,33 @@ def map_to_database(
             )
         )
         created += 1
+
+    # Always index every page's own text as a generic narrative knowledge
+    # record, regardless of what (if anything) the structured parser above
+    # recognized — this is the fix for a document whose content simply
+    # doesn't match any of the Label:Value categories (e.g. a lab report's
+    # test-result tables): previously such a document produced zero
+    # knowledge_records and was completely unretrievable despite uploading
+    # successfully (progress/DECISIONS.md "PDF retrieval fix"). These do not
+    # count toward `created` (no canonical table row backs them — "records
+    # created" keeps meaning structured rows), but they do get embedded and
+    # indexed, so the upload response can honestly report "0 records
+    # created, N chunks indexed" for a document like this.
+    display_ref = patient.display_id if patient and patient.display_id else (patient_id or "Unknown")
+    for section in data.narrative_sections:
+        knowledge_record_ids.append(
+            _add_knowledge_record(
+                db,
+                patient_id=patient_id,
+                record_type="document",
+                record_id=None,  # no canonical table row backs a raw narrative page chunk
+                sensitivity="clinical",
+                content=f"Patient: {display_ref}\nDocument page {section.source_page}\n\n{section.content}",
+                source_document_id=source_document_id,
+                source_page=section.source_page,
+                source_section="document",
+            )
+        )
 
     db.commit()
     return created, knowledge_record_ids, patient, patient_created

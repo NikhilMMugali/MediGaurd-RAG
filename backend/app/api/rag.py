@@ -31,6 +31,8 @@ def rag_query(
                 section=c.section,
                 date=c.date,
                 patient_id=c.patient_id,
+                evidence_text=c.evidence_text,
+                document_id=c.document_id,
             )
             for c in result.citations
         ],

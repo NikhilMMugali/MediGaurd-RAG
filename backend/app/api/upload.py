@@ -2,6 +2,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -10,7 +11,7 @@ from app.authorization.context import AuthorizationContext, build_authorization_
 from app.config import get_settings
 from app.db.session import get_db
 from app.ingestion.pdf_extractor import PdfExtractionError, extract_pdf
-from app.ingestion.pdf_mapper import extract_patient_document_data, map_to_database
+from app.ingestion.pdf_mapper import _add_knowledge_record, extract_patient_document_data, map_to_database, narrative_sections_for_document
 from app.models.documents import IngestionJob, KnowledgeRecord, SourceDocument
 from app.models.hospital import Patient
 from app.models.provenance import new_uuid
@@ -52,6 +53,102 @@ def _document_authorized(ctx: AuthorizationContext, doc: SourceDocument, user_id
     return False
 
 
+def _patient_display_id(db: Session, internal_patient_id: str | None) -> str | None:
+    if not internal_patient_id:
+        return None
+    patient = db.query(Patient).filter(Patient.id == internal_patient_id).first()
+    return (patient.display_id or patient.id) if patient else internal_patient_id
+
+
+def _handle_duplicate_upload(db: Session, user: User, existing: SourceDocument, result) -> UploadResponse:
+    """A duplicate file hash used to be a dead end — a 409 with no further
+    checks, regardless of whether the existing document was ever actually
+    indexed. A document that predates this session's fixes (or whose
+    indexing failed the first time) would report "already uploaded,
+    COMPLETED" while having zero retrievable content, which is exactly the
+    reported bug: upload "succeeds" the second time too, but the assistant
+    still has nothing to answer from (progress/DECISIONS.md "PDF retrieval
+    fix"). This verifies the existing document's actual indexed state and
+    repairs it in place when it's missing, instead of re-raising the same
+    dead-end 409."""
+    ctx = build_authorization_context(db, user)
+    if not _document_authorized(ctx, existing, user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this document.")
+
+    existing_kr_count = db.query(KnowledgeRecord).filter(KnowledgeRecord.source_document_id == existing.id).count()
+    if existing_kr_count > 0:
+        return UploadResponse(
+            document_id=existing.id,
+            file_name=existing.file_name,
+            status=existing.status,
+            page_count=result.page_count,
+            message=f"This document was already uploaded and is fully indexed ({existing_kr_count} knowledge chunk(s)).",
+            patient_id=_patient_display_id(db, existing.patient_id),
+            records_created=0,
+            chunks_indexed=existing_kr_count,
+        )
+
+    if existing.status != "COMPLETED" and existing.status != "NEEDS_REVIEW":
+        # FAILED or still mid-processing from a prior attempt — nothing
+        # safe to repair automatically; say so rather than guessing.
+        return UploadResponse(
+            document_id=existing.id,
+            file_name=existing.file_name,
+            status=existing.status,
+            page_count=result.page_count,
+            message=f"This document was already uploaded but did not finish processing (status: {existing.status}).",
+            patient_id=_patient_display_id(db, existing.patient_id),
+            records_created=0,
+            chunks_indexed=0,
+        )
+
+    # Broken/incomplete duplicate: repair in place. Only the narrative
+    # knowledge records are (re)created here, never the structured rows —
+    # map_to_database's per-row inserts are not idempotent, so re-running it
+    # against a document that already has some structured rows would
+    # duplicate them. Narrative records are additive-safe since this branch
+    # is only reached when none exist yet for this document at all.
+    narrative_sections = narrative_sections_for_document(result)
+    display_ref = _patient_display_id(db, existing.patient_id) or "Unknown"
+    knowledge_record_ids = [
+        _add_knowledge_record(
+            db,
+            patient_id=existing.patient_id,
+            record_type="document",
+            record_id=None,
+            sensitivity="clinical",
+            content=f"Patient: {display_ref}\nDocument page {section.source_page}\n\n{section.content}",
+            source_document_id=existing.id,
+            source_page=section.source_page,
+            source_section="document",
+        )
+        for section in narrative_sections
+    ]
+    db.commit()
+
+    chunks_indexed = 0
+    if knowledge_record_ids:
+        records = db.query(KnowledgeRecord).filter(KnowledgeRecord.id.in_(knowledge_record_ids)).all()
+        chunks_indexed = index_records(records, get_embedding_provider(), get_vector_store())
+
+    existing.status = "COMPLETED"
+    db.commit()
+
+    return UploadResponse(
+        document_id=existing.id,
+        file_name=existing.file_name,
+        status="COMPLETED",
+        page_count=result.page_count,
+        message=(
+            f"This document was already uploaded; it was missing indexed content, so {chunks_indexed} "
+            "knowledge chunk(s) have now been indexed and it is ready to query."
+        ),
+        patient_id=display_ref if existing.patient_id else None,
+        records_created=0,
+        chunks_indexed=chunks_indexed,
+    )
+
+
 @router.post("/upload", response_model=UploadResponse)
 async def upload_document(
     file: UploadFile,
@@ -78,10 +175,7 @@ async def upload_document(
 
     existing = db.query(SourceDocument).filter(SourceDocument.file_hash == result.file_hash).first()
     if existing is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"This file was already uploaded as document {existing.id} ({existing.status}).",
-        )
+        return _handle_duplicate_upload(db, user, existing, result)
 
     document = SourceDocument(
         id=new_uuid(),
@@ -311,6 +405,38 @@ def document_status(
     )
 
 
+@router.get("/{document_id}/file")
+def get_document_file(
+    document_id: str,
+    user: User = Depends(require_roles(*_DOC_ROLES)),
+    db: Session = Depends(get_db),
+):
+    """Streams the original PDF bytes for the in-app viewer. Authenticated
+    and authorization-checked exactly like every other document endpoint —
+    there is no unauthenticated static-file route for uploaded documents
+    (section 10B "every document fetch must verify authorization
+    server-side"). The frontend fetches this with its Authorization header
+    and turns the response into an object URL; it is never a plain <a href>
+    or <iframe src> to this path."""
+    doc = db.query(SourceDocument).filter(SourceDocument.id == document_id).first()
+    if doc is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+
+    ctx = build_authorization_context(db, user)
+    if not _document_authorized(ctx, doc, user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this document.")
+
+    if not doc.storage_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No stored file for this document.")
+
+    upload_dir = Path(settings.upload_dir).resolve()
+    full_path = (upload_dir / doc.storage_path).resolve()
+    if upload_dir not in full_path.parents or not full_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stored file is missing.")
+
+    return FileResponse(full_path, media_type="application/pdf", filename=doc.file_name)
+
+
 @router.post("/query", response_model=DocumentQueryResponse)
 def query_document(
     payload: DocumentQueryRequest,
@@ -356,6 +482,8 @@ def query_document(
                 section=c.section,
                 date=c.date,
                 patient_id=c.patient_id,
+                evidence_text=c.evidence_text,
+                document_id=c.document_id,
             )
             for c in result.citations
         ],

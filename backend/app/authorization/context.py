@@ -21,6 +21,13 @@ CLINICAL_RECORD_TYPES = [
     "immunization",
     "imaging_study",
     "device",
+    # Generic page-level narrative text from an uploaded PDF that doesn't
+    # map to any of the structured types above (e.g. a lab report's test
+    # tables) — see app.ingestion.pdf_mapper's per-page fallback. Without
+    # this, such a document's only knowledge_records would never match any
+    # role's allowed_record_types and would be structurally unretrievable
+    # regardless of correct patient/authorization resolution.
+    "document",
 ]
 OPERATIONAL_RECORD_TYPES = ["encounter"]
 FINANCE_RECORD_TYPES = ["claim", "claim_transaction", "payer", "payer_transition"]

@@ -64,13 +64,21 @@ class VectorStore:
     def count(self) -> int:
         return self.client.count(collection_name=self.collection).count
 
-    def search(self, vector: list[float], query_filter: Filter | None, limit: int, score_threshold: float) -> list[ScoredPoint]:
+    def search(self, vector: list[float], query_filter: Filter | None, limit: int, score_threshold: float | None) -> list[ScoredPoint]:
+        # `score_threshold or None` used to silently disable the configured
+        # threshold whenever it was exactly 0.0 — Python falsiness, not a
+        # deliberate "no filter" sentinel — which is exactly what
+        # RAG_SCORE_THRESHOLD's own default (0.0) was set to, so the
+        # threshold was never actually applied by any caller regardless of
+        # what it was configured to (docs/DECISIONS.md "relevance floor").
+        # None is the real "no filter" sentinel now; a caller that wants no
+        # threshold passes None explicitly.
         return self.client.search(
             collection_name=self.collection,
             query_vector=vector,
             query_filter=query_filter,
             limit=limit,
-            score_threshold=score_threshold or None,
+            score_threshold=score_threshold,
         )
 
     def retrieve_by_ids(self, ids: list[str]) -> list:
