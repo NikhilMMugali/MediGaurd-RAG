@@ -1,9 +1,10 @@
 import * as React from "react";
-import { Loader2, Send, X } from "lucide-react";
+import { Loader2, Paperclip, Send, X } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
 import { queryRag } from "@/api/rag";
+import { uploadDocument } from "@/api/documents";
 import { ApiError } from "@/api/client";
-import { ROLE_ASSISTANT_NAME, ROLE_PLACEHOLDER, ROLE_QUICK_PROMPTS } from "@/lib/roles";
+import { CAN_UPLOAD, ROLE_ASSISTANT_NAME, ROLE_PLACEHOLDER, ROLE_QUICK_PROMPTS } from "@/lib/roles";
 import type { Citation, RagStatus } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,14 +21,17 @@ interface Message {
 interface AssistantPanelProps {
   patientId: string | null;
   onClearPatient: () => void;
+  onSelectPatient: (patientId: string) => void;
 }
 
-export default function AssistantPanel({ patientId, onClearPatient }: AssistantPanelProps) {
+export default function AssistantPanel({ patientId, onClearPatient, onSelectPatient }: AssistantPanelProps) {
   const { user } = useAuth();
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [input, setInput] = React.useState("");
   const [isLoading, setIsLoading] = React.useState(false);
+  const [isUploading, setIsUploading] = React.useState(false);
   const bottomRef = React.useRef<HTMLDivElement>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -54,6 +58,51 @@ export default function AssistantPanel({ patientId, onClearPatient }: AssistantP
     }
   }
 
+  async function handleFileSelected(file: File) {
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setMessages((prev) => [...prev, { role: "assistant", text: "Only PDF files are supported." }]);
+      return;
+    }
+    setMessages((prev) => [...prev, { role: "user", text: `📎 Uploaded ${file.name}` }]);
+    setIsUploading(true);
+    try {
+      const result = await uploadDocument(file);
+
+      if (result.status === "NEEDS_REVIEW") {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            text: `I saved **${result.file_name}**, but it looks like a scanned/image-only PDF with no extractable text — OCR isn't supported yet, so it's stored for manual review rather than indexed.`,
+          },
+        ]);
+        return;
+      }
+
+      const patientLine = result.patient_id
+        ? `for patient **${result.patient_id}**`
+        : "but no patient could be identified in it";
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text:
+            `Processed **${result.file_name}** ${patientLine} — ${result.records_created} record(s) created, ` +
+            `${result.chunks_indexed} chunk(s) indexed and ready to search.` +
+            (result.patient_id ? " You can now ask questions about this patient below." : ""),
+        },
+      ]);
+      if (result.patient_id) onSelectPatient(result.patient_id);
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "Upload failed. Please try again.";
+      setMessages((prev) => [...prev, { role: "assistant", text: message }]);
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  const canUpload = CAN_UPLOAD.includes(user.role);
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
@@ -72,6 +121,12 @@ export default function AssistantPanel({ patientId, onClearPatient }: AssistantP
         {messages.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
             <p>{patientId ? "Ask anything you are authorized to access." : "Select a patient or ask MediGaurd a question."}</p>
+            {canUpload && (
+              <p className="flex items-center gap-1 text-xs">
+                <Paperclip className="h-3 w-3" />
+                You can also upload a patient PDF using the attach button below.
+              </p>
+            )}
             <div className="flex flex-wrap justify-center gap-2">
               {ROLE_QUICK_PROMPTS[user.role].map((prompt) => (
                 <Button key={prompt} variant="outline" size="sm" onClick={() => send(prompt)}>
@@ -92,6 +147,12 @@ export default function AssistantPanel({ patientId, onClearPatient }: AssistantP
               MediGaurd is thinking...
             </p>
           )}
+          {isUploading && (
+            <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Uploading and processing document...
+            </p>
+          )}
         </div>
         <div ref={bottomRef} />
       </div>
@@ -103,6 +164,32 @@ export default function AssistantPanel({ patientId, onClearPatient }: AssistantP
           send(input);
         }}
       >
+        {canUpload && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void handleFileSelected(file);
+                e.target.value = "";
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              disabled={isUploading || isLoading}
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Upload a patient PDF"
+              title="Upload a patient PDF"
+            >
+              {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+            </Button>
+          </>
+        )}
         <Textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
