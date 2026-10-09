@@ -21,6 +21,8 @@ export interface Citation {
   section: string | null;
   date: string | null;
   patient_id: string | null;
+  evidence_text: string | null;
+  document_id: string | null;
 }
 
 export type RagStatus = "ANSWERED" | "DENIED" | "NO_AUTHORIZED_CONTEXT";

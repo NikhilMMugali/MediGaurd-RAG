@@ -8,6 +8,7 @@ interface ChatMessageProps {
   text: string;
   status?: RagStatus;
   citations?: Citation[];
+  onCitationClick?: (citation: Citation) => void;
 }
 
 function formatDate(iso: string): string {
@@ -24,6 +25,10 @@ function citationKind(c: Citation): string {
 interface GroupedCitation {
   ids: string[];
   label: string;
+  // The representative citation this group's click should open — always
+  // PDF-backed (document_id set) when the group itself came from a file,
+  // since only those are actually openable in the viewer.
+  citation: Citation;
 }
 
 // Several sources from the same record type on the same date (e.g. five
@@ -33,35 +38,35 @@ interface GroupedCitation {
 function groupCitations(citations: Citation[]): GroupedCitation[] {
   const groups = new Map<
     string,
-    { ids: string[]; kind: string; date: string | null; patientId: string | null; fileName: string | null; page: number | null }
+    { ids: string[]; kind: string; date: string | null; patientId: string | null; fileName: string | null; page: number | null; citation: Citation }
   >();
   for (const c of citations) {
     if (c.file_name) {
       const key = `file:${c.file_name}:${c.page ?? ""}:${c.section ?? ""}`;
       const existing = groups.get(key);
       if (existing) existing.ids.push(c.source_id);
-      else groups.set(key, { ids: [c.source_id], kind: citationKind(c), date: null, patientId: null, fileName: c.file_name, page: c.page });
+      else groups.set(key, { ids: [c.source_id], kind: citationKind(c), date: null, patientId: null, fileName: c.file_name, page: c.page, citation: c });
       continue;
     }
     const key = `db:${c.section ?? c.source_type}:${c.date ?? ""}:${c.patient_id ?? ""}`;
     const existing = groups.get(key);
     if (existing) existing.ids.push(c.source_id);
-    else groups.set(key, { ids: [c.source_id], kind: citationKind(c), date: c.date, patientId: c.patient_id, fileName: null, page: null });
+    else groups.set(key, { ids: [c.source_id], kind: citationKind(c), date: c.date, patientId: c.patient_id, fileName: null, page: null, citation: c });
   }
 
   return Array.from(groups.values()).map((g) => {
     const kind = g.ids.length > 1 ? `${g.kind}s` : g.kind;
     if (g.fileName) {
-      return { ids: g.ids, label: `${g.fileName}${g.page ? ` — Page ${g.page}` : ""}` };
+      return { ids: g.ids, label: `${g.fileName}${g.page ? ` — Page ${g.page}` : ""}`, citation: g.citation };
     }
     // "Condition record · P001 · 14 Mar 2026" — patient id included since a
     // summary/multi-patient answer can mix sources from more than one.
     const parts = [`${kind} record`, g.patientId, g.date ? formatDate(g.date) : null].filter(Boolean);
-    return { ids: g.ids, label: parts.join(" · ") };
+    return { ids: g.ids, label: parts.join(" · "), citation: g.citation };
   });
 }
 
-export default function ChatMessage({ role, text, status, citations }: ChatMessageProps) {
+export default function ChatMessage({ role, text, status, citations, onCitationClick }: ChatMessageProps) {
   if (role === "user") {
     return (
       <div className="flex justify-end">
@@ -96,14 +101,32 @@ export default function ChatMessage({ role, text, status, citations }: ChatMessa
         <div className="px-1">
           <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Sources</p>
           <ul className="flex flex-col gap-1">
-            {grouped.map((g) => (
-              <li key={g.ids.join(",")} className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                  {g.ids.map((id) => id.replace("SOURCE_", "")).join(",")}
-                </Badge>
-                {g.label}
-              </li>
-            ))}
+            {grouped.map((g) => {
+              const openable = Boolean(onCitationClick && g.citation.document_id);
+              const content = (
+                <>
+                  <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                    {g.ids.map((id) => id.replace("SOURCE_", "")).join(",")}
+                  </Badge>
+                  {g.label}
+                </>
+              );
+              return (
+                <li key={g.ids.join(",")}>
+                  {openable ? (
+                    <button
+                      type="button"
+                      onClick={() => onCitationClick?.(g.citation)}
+                      className="flex items-center gap-2 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    >
+                      {content}
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">{content}</div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

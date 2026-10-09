@@ -68,3 +68,33 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
+
+// For binary responses (the authenticated PDF file endpoint) — same auth
+// header and error handling as apiRequest, but returns a Blob instead of
+// parsing JSON. The caller turns this into an object URL; the PDF is never
+// fetched via a plain <iframe src> or <a href>, which couldn't carry the
+// Authorization header at all (section 10B).
+export async function apiRequestBlob(path: string): Promise<Blob> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const response = await fetch(`${API_BASE_URL}${path}`, { headers });
+
+  if (response.status === 401) {
+    setToken(null);
+    onUnauthorized?.();
+    throw new ApiError(401, "Session expired. Please log in again.");
+  }
+  if (!response.ok) {
+    let message = "Could not load this file.";
+    try {
+      const data = await response.json();
+      if (typeof data.detail === "string") message = data.detail;
+    } catch {
+      // keep generic message
+    }
+    throw new ApiError(response.status, message);
+  }
+  return response.blob();
+}

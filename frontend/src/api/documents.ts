@@ -1,4 +1,4 @@
-import { apiRequest } from "@/api/client";
+import { apiRequest, apiRequestBlob } from "@/api/client";
 import type { DocumentListResponse, DocumentQueryResponse, DocumentStatusResponse, DocumentUploadLimits, UploadResponse } from "@/types";
 
 export function getUploadLimits() {
@@ -27,4 +27,8 @@ export function queryDocument(documentId: string, question: string) {
     method: "POST",
     body: { document_id: documentId, question },
   });
+}
+
+export function getDocumentFileBlob(documentId: string) {
+  return apiRequestBlob(`/api/documents/${encodeURIComponent(documentId)}/file`);
 }

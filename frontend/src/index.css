@@ -93,3 +93,10 @@ body {
   padding: 0.1em 0.3em;
   font-size: 0.9em;
 }
+
+/* PdfViewerPanel.tsx — marks the on-page text fragment matching a
+   citation's evidence text, inside react-pdf's text layer. */
+.pdf-evidence-highlight {
+  background-color: rgba(250, 204, 21, 0.55);
+  border-radius: 0.15em;
+}

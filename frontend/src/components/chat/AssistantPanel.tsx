@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import ChatMessage from "@/components/chat/ChatMessage";
+import PdfViewerPanel from "@/components/documents/PdfViewerPanel";
 
 interface Message {
   role: "user" | "assistant";
@@ -30,6 +31,7 @@ export default function AssistantPanel({ patientId, onClearPatient, onSelectPati
   const [input, setInput] = React.useState("");
   const [isLoading, setIsLoading] = React.useState(false);
   const [isUploading, setIsUploading] = React.useState(false);
+  const [activeCitation, setActiveCitation] = React.useState<Citation | null>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -104,7 +106,8 @@ export default function AssistantPanel({ patientId, onClearPatient, onSelectPati
   const canUpload = CAN_UPLOAD.includes(user.role);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0">
+      <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h2 className="text-sm font-semibold">{ROLE_ASSISTANT_NAME[user.role]}</h2>
         {patientId && (
@@ -139,7 +142,14 @@ export default function AssistantPanel({ patientId, onClearPatient, onSelectPati
 
         <div className="flex flex-col gap-4">
           {messages.map((m, i) => (
-            <ChatMessage key={i} role={m.role} text={m.text} status={m.status} citations={m.citations} />
+            <ChatMessage
+              key={i}
+              role={m.role}
+              text={m.text}
+              status={m.status}
+              citations={m.citations}
+              onCitationClick={setActiveCitation}
+            />
           ))}
           {isLoading && (
             <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -207,6 +217,13 @@ export default function AssistantPanel({ patientId, onClearPatient, onSelectPati
           <Send className="h-4 w-4" />
         </Button>
       </form>
+      </div>
+
+      {activeCitation && (
+        <div className="hidden w-[420px] shrink-0 md:block">
+          <PdfViewerPanel citation={activeCitation} onClose={() => setActiveCitation(null)} />
+        </div>
+      )}
     </div>
   );
 }
