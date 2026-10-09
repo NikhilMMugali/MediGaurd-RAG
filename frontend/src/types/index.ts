@@ -92,3 +92,69 @@ export interface RecentActivity {
   recent_uploads: RecentUpload[];
   recent_security_events: RecentSecurityEvent[];
 }
+
+export interface DocumentUploadLimits {
+  max_upload_size_mb: number;
+}
+
+export interface DocumentListItem {
+  document_id: string;
+  file_name: string;
+  status: string;
+  document_type: string | null;
+  patient_id: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+export interface DocumentListResponse {
+  documents: DocumentListItem[];
+  total: number;
+}
+
+export interface DocumentStatusResponse {
+  document_id: string;
+  file_name: string;
+  status: string;
+  patient_id: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+  page_count: number | null;
+  records_created: number;
+  chunks_created: number;
+  error_message: string | null;
+}
+
+export interface DocumentQueryResponse {
+  answer: string;
+  status: RagStatus;
+  citations: Citation[];
+  retrieved_count: number;
+}
+
+export interface Metric {
+  key: string;
+  label: string;
+  value: number | string;
+  unit: string | null;
+}
+
+export interface Breakdown {
+  label: string;
+  items: [string, number][];
+}
+
+export interface InsightsOverviewResponse {
+  role: string;
+  period: string;
+  generated_at: string;
+  metrics: Metric[];
+  breakdown: Breakdown | null;
+  note: string | null;
+}
+
+export interface InsightsQueryResponse {
+  answer: string;
+  metrics: Metric[];
+  generated_at: string;
+}

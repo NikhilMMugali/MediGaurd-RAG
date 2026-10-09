@@ -46,3 +46,10 @@ export const DEMO_CREDENTIALS: Record<Role, { username: string; password: string
 };
 
 export const CAN_UPLOAD: Role[] = ["DOCTOR", "NURSE", "ADMIN"];
+
+// Document Intelligence is backed by endpoints that require DOCTOR/NURSE/ADMIN
+// server-side (app.api.upload._DOC_ROLES) — kept in sync here only to decide
+// whether to show the nav link at all; the server-side check is what
+// actually enforces it (section 10 "never duplicate security logic in the
+// frontend" — this is a visibility convenience, not an access control).
+export const CAN_VIEW_DOCUMENTS: Role[] = ["DOCTOR", "NURSE", "ADMIN"];
