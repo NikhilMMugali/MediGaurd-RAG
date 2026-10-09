@@ -10,7 +10,9 @@ from app.authorization.context import AuthorizationContext
 from app.services.vector_store import match_value_or_any
 
 
-def build_retrieval_filter(ctx: AuthorizationContext, record_types: list[str] | None = None) -> Filter:
+def build_retrieval_filter(
+    ctx: AuthorizationContext, record_types: list[str] | None = None, source_document_id: str | None = None
+) -> Filter:
     # record_types, when given, is query-classification's narrowing of what
     # the role is allowed to see (app.rag.query_classification) — it is
     # always already intersected with ctx.allowed_record_types by the
@@ -25,5 +27,10 @@ def build_retrieval_filter(ctx: AuthorizationContext, record_types: list[str] | 
         # invoked (see app.rag.pipeline) — it short-circuits to a denial
         # rather than relying on Qdrant to reject an empty MatchAny.
         must.append(match_value_or_any("patient_id", ctx.assigned_patient_ids))
+    if source_document_id is not None:
+        # Document Intelligence Q&A (app.api.upload::query_document) — scopes
+        # retrieval to one document's own chunks on top of every other
+        # authorization condition above, never in place of them.
+        must.append(match_value_or_any("source_document_id", [source_document_id]))
 
     return Filter(must=must)

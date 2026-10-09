@@ -64,8 +64,11 @@ _RECORD_TYPE_LABELS = {
 
 # A SOURCE_n the LLM might cite but that doesn't exist in what was actually
 # retrieved (section 78 "LLM response validation") — stripped post-hoc so a
-# dangling citation never reaches the user.
-_SOURCE_CITATION_RE = re.compile(r"\[SOURCE_(\d+)\]")
+# dangling citation never reaches the user. Also matches the full-width
+# bracket variants (｢SOURCE_1｣, 〔SOURCE_1〕) gpt-oss-120b occasionally emits
+# instead of ASCII brackets — an un-matched citation marker would otherwise
+# skip validation entirely rather than being checked or stripped.
+_SOURCE_CITATION_RE = re.compile(r"[\[【〔｢]SOURCE_(\d+)[\]】〕｣]")
 
 
 @dataclass
@@ -232,12 +235,17 @@ def _retrieve_for_known_patient(
     effective_record_types: list[str],
     intent: QueryIntent,
     debug: dict,
+    document_id: str | None = None,
 ) -> tuple[list[dict], dict]:
     query = db.query(KnowledgeRecord).filter(
         KnowledgeRecord.patient_id == patient_id,
         KnowledgeRecord.record_type.in_(effective_record_types),
         KnowledgeRecord.sensitivity.in_(ctx.allowed_sensitivity),
     )
+    if document_id is not None:
+        # Document Intelligence Q&A: narrow to this document's own chunks
+        # only, on top of every other authorization filter above.
+        query = query.filter(KnowledgeRecord.source_document_id == document_id)
     # Only meaningful when the classifier narrowed down to observations
     # specifically — an unclassified "tell me about this patient" query
     # still spans every allowed record type and must not be sub-filtered.
@@ -299,7 +307,7 @@ def _format_source_block(index: int, s: dict) -> str:
     return "\n".join(lines)
 
 
-def _semantic_retrieve(db: Session, aq: _AuthorizedQuery, question: str) -> RetrievalOutcome:
+def _semantic_retrieve(db: Session, aq: _AuthorizedQuery, question: str, document_id: str | None = None) -> RetrievalOutcome:
     embedder = get_embedding_provider()
     store = get_vector_store()
     vector = embedder.embed_text(question)
@@ -314,10 +322,10 @@ def _semantic_retrieve(db: Session, aq: _AuthorizedQuery, question: str) -> Retr
         # already-narrowed candidate set directly, and Qdrant's
         # retrieve-by-id is O(k) regardless of collection size.
         sources, debug = _retrieve_for_known_patient(
-            db, store, vector, aq.ctx, aq.resolved_patient, aq.effective_record_types, aq.intent, aq.debug
+            db, store, vector, aq.ctx, aq.resolved_patient, aq.effective_record_types, aq.intent, aq.debug, document_id
         )
     else:
-        query_filter: Filter = build_retrieval_filter(aq.ctx, aq.effective_record_types)
+        query_filter: Filter = build_retrieval_filter(aq.ctx, aq.effective_record_types, document_id)
         aq.debug["qdrant_filter"] = str(query_filter)
         hits = store.search(vector, query_filter, settings.rag_top_k, settings.rag_score_threshold)
         sources = [hit.payload for hit in hits][: settings.rag_context_k]
@@ -378,7 +386,9 @@ def _structured_sources_to_citations(db: Session, sources: list, display_id: str
     ]
 
 
-def run_query(db: Session, user: User, question: str, patient_id: str | None = None) -> RagResult:
+def run_query(
+    db: Session, user: User, question: str, patient_id: str | None = None, document_id: str | None = None
+) -> RagResult:
     authorized = _authorize_and_classify(db, user, question, patient_id)
     if isinstance(authorized, RetrievalOutcome):
         reason = authorized.denial_answer or ""
@@ -387,12 +397,16 @@ def run_query(db: Session, user: User, question: str, patient_id: str | None = N
 
     intent = authorized.intent
 
+    # Document Intelligence Q&A (app.api.upload::query_document) always
+    # passes document_id — a document-scoped question is answered from that
+    # document's own retrieved chunks via the semantic path, never the
+    # structured/summary DB lookups (those don't know about document_id).
     # Exact-fact and summary routes never touch Qdrant or the LLM — a
     # deterministic DB lookup can't hallucinate (docs/DECISIONS.md "hybrid
     # RAG"). Only reachable when a specific patient is in context; a
     # structured/summary question with no selected patient falls through to
     # the semantic path below, same as before.
-    if authorized.resolved_patient and intent.route in ("structured", "summary"):
+    if document_id is None and authorized.resolved_patient and intent.route in ("structured", "summary"):
         display_id = _display_id_for(db, authorized.resolved_patient)
         if intent.route == "summary":
             structured = structured_answers.answer_summary(
@@ -428,7 +442,7 @@ def run_query(db: Session, user: User, question: str, patient_id: str | None = N
             debug=authorized.debug,
         )
 
-    outcome = _semantic_retrieve(db, authorized, question)
+    outcome = _semantic_retrieve(db, authorized, question, document_id)
     if outcome.status != "OK":
         reason = outcome.denial_answer or ""
         _write_audit_log(db, user, question, outcome.status, [], reason)

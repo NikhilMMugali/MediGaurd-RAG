@@ -45,13 +45,11 @@ def extract_pdf(file_bytes: bytes, file_name: str) -> PdfExtractionResult:
     document.close()
 
     is_text_extractable = extractable_pages > 0
-    if not is_text_extractable:
-        # No OCR fallback is wired up yet; surface this clearly rather than
-        # silently returning empty pages that downstream chunking would treat
-        # as "no content found".
-        raise PdfExtractionError(
-            f"'{file_name}' appears to be a scanned/image-only PDF. OCR fallback is not yet enabled."
-        )
+    # No OCR fallback is wired up yet. This used to raise and discard the
+    # upload entirely; now the caller (app.api.upload) persists the document
+    # with status NEEDS_REVIEW instead of silently losing it — a scanned PDF
+    # is a real, expected input, not a malformed one (docs/DATA_FLOW.md "OCR
+    # scope").
 
     return PdfExtractionResult(
         file_name=file_name,
