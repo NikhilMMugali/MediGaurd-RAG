@@ -105,6 +105,8 @@ A `source_documents` row is visible — in the document list, its status endpoin
 
 Document-scoped Q&A (`POST /api/documents/query`) additionally narrows retrieval to that one document's own chunks (`source_document_id` added to the Qdrant filter / SQL fast-path query), on top of every normal record-type/sensitivity/patient-assignment condition — so an authorized user still can't have one document's content answer a question about another.
 
+`GET /api/documents/{document_id}/file` (2026-10-09, backs the citation PDF viewer) runs the exact same `_document_authorized` check before streaming a single byte — there is no unauthenticated static-file route for an uploaded PDF, and a guessed/enumerated `document_id` gets the same `403` as every other document endpoint.
+
 ## Hospital Insights authorization
 
 `GET /api/insights/overview` and `POST /api/insights/query` compute metrics using the exact same `AuthorizationContext` as chat/document retrieval (`app.rag.insights.build_overview`). A patient-scoped role's counts are always filtered to `assigned_patient_ids` — there is no "aggregate across all patients" path a `DOCTOR`/`NURSE` can reach, by natural language or otherwise. `FINANCE`/`RECEPTION` are not patient-scoped (same as their existing retrieval authorization), so their aggregates are role-wide by design, matching how chat queries already behave for those roles. The LLM is only ever given the metrics already computed by SQL, each tagged as a single citable source — it narrates them, it cannot introduce a number of its own under a fake citation.

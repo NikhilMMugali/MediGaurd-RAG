@@ -54,7 +54,9 @@ Response `200` (text extracted and mapped):
 
 Response `200` (scanned/image-only PDF — no OCR yet): `status: "NEEDS_REVIEW"`, `patient_id: null`, `records_created: 0`, `chunks_indexed: 0`. The file and its `source_documents` row are still persisted — nothing is silently discarded (see "OCR scope" in [DATA_FLOW.md](DATA_FLOW.md)).
 
-`400` — not a PDF or exceeds size limit. `409` — duplicate file hash. `422` — PDF could not be parsed at all (empty/malformed file).
+`400` — not a PDF or exceeds size limit. `422` — PDF could not be parsed at all (empty/malformed file).
+
+**Duplicate file hash — no longer a dead-end `409`** (2026-10-09 fix, see `docs/DECISIONS.md` "PDF retrieval fix"). A duplicate now returns `200` with the *real* state of the already-existing document: if it already has indexed knowledge records, the response reports that (`status`, `chunks_indexed` from the existing document, same `document_id`); if it has none (it predates this fix, or indexing previously failed), the server repairs it in place — generates and indexes its narrative knowledge records against the *same* `document_id` — before responding, rather than returning a second confusing dead-end. See `app.api.upload._handle_duplicate_upload`.
 
 ### `GET /api/documents/limits`
 Implemented. Returns `{"max_upload_size_mb": 20}` from server config, so the frontend's client-side size check is never a hardcoded guess.
@@ -65,8 +67,14 @@ Implemented. Lists only documents the caller is authorized to see: every documen
 ### `GET /api/documents/{document_id}/status`
 Implemented. `403` if the caller isn't authorized for that document (same rule as the list endpoint). Returns the persisted, authoritative processing state — `status`, `page_count` (computed live from the stored PDF), `records_created`, `chunks_created`, `error_message` — never an optimistic client-side guess.
 
+### `GET /api/documents/{document_id}/file`
+Implemented (2026-10-09, for the PDF citation viewer — section 10B). Streams the original PDF bytes (`Content-Type: application/pdf`). Authenticated and authorization-checked identically to every other document endpoint — `403` before the file is touched if the caller isn't authorized for that document; `404` if no file was ever stored. There is no unauthenticated static route for uploaded documents; the frontend fetches this with its `Authorization` header and turns the response into a blob object URL, never a plain `<iframe src>`/`<a href>`.
+
 ### `POST /api/documents/query`
 Implemented — secure, document-scoped Q&A. Body: `{"document_id": "...", "question": "..."}`. `403` before any retrieval if the document isn't authorized for the caller. Internally calls `app.rag.pipeline.run_query(..., document_id=...)`, which adds a `source_document_id` condition to the Qdrant filter (or the SQL fast-path query) on top of every normal authorization condition — so even an authorized user only ever gets answers grounded in *that* document's own chunks, never another document's. Response shape matches `/api/rag/query`.
+
+### Citation shape (both `/api/rag/query` and `/api/documents/query`)
+Each citation now also carries `document_id` (the `source_documents.id` to pass to `GET /api/documents/{id}/file`, `null` for a Synthea-derived citation with no PDF) and `evidence_text` (the actual retrieved text this citation is grounded in, used by the frontend to locate/highlight the cited passage on the opened page). Added 2026-10-09 — see "PDF retrieval fix" in `docs/DECISIONS.md`.
 
 ## Patients (added for the frontend — reuses existing authorization/RAG, no new security logic)
 

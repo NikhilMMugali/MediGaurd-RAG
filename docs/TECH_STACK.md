@@ -25,6 +25,7 @@
 | Routing | `react-router-dom` | `/patients`, `/assistant/chat`, `/assistant/documents`, `/assistant/insights` — see `frontend/src/App.tsx`. |
 | Styling | Tailwind CSS + Radix UI primitives + `lucide-react` icons | Enterprise-dashboard aesthetic, restrained shadows/gradients, no heavy animation library. |
 | Markdown rendering | `react-markdown` + `remark-gfm` | Chat/document/insight answers render as real Markdown (bold, tables, lists) — never raw `**`/`|` characters in the UI. |
+| PDF viewer | `react-pdf` (pdf.js) | Citation → PDF viewer panel in Clinical Chat (2026-10-09); the PDF is always fetched through the authenticated `GET /api/documents/{id}/file` endpoint as a blob, never a plain `<iframe src>`/`<a href>`. |
 | State | Local component state + React Router's `Outlet` context for cross-page "selected patient" | No global state library — the app's state surface doesn't need one. |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the directory layout.

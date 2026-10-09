@@ -134,5 +134,34 @@ See progress/DECISIONS.md for the full architecture writeup and docs/CLEAN_DATAS
 - [x] Frontend production build (`npm run build`) and lint (`npm run lint`) both clean
 - [ ] Manual browser click-through of the new UI not done this pass either — still no browser automation tool available; verified via build + live curl smoke tests instead (see TODO.md)
 
+## 2026-10-09 (later) — PDF retrieval fix + citation PDF viewer
+
+Reproduced a real reported bug (uploaded lab report → "tell me about <patient>" → "no information found" with unrelated patients' records shown as sources) using a synthetic fixture matching the real document's structure, traced to four compounding root causes, and fixed all four. Full writeup: `progress/DECISIONS.md` "PDF retrieval fix."
+
+### Root-cause fixes
+- [x] Narrative page-text fallback (`record_type="document"`) — every PDF page is now indexed regardless of whether its content matches any structured Label:Value category; previously a lab-report-shaped document produced zero knowledge_records and was completely unretrievable
+- [x] Field-boundary-aware identity extraction fallback — recovers a clean name/registration-id/gender from a real-world header line that packs two fields onto one line ("Name : X Reg. No. : Y"), which the naive per-line parser garbled
+- [x] Free-text patient-name resolution (`_resolve_patient_by_name`) — a question naming a patient by name, not just by Pxxx id, now resolves; previously had no resolution path at all and silently searched unscoped across every patient
+- [x] Relevance-threshold bug fixed (`score_threshold or None` was silently discarding the configured floor whenever it was `0.0`, which was also the default) — default raised to `0.35`; applied to both the Qdrant search branch and the known-patient SQL fast path's ranking
+
+### Also fixed
+- [x] Duplicate-upload handling — no longer a dead-end 409; a duplicate with zero actual knowledge records is repaired in place against the same document_id, not re-reported as a confusing "already uploaded, COMPLETED"
+- [x] Citations gained `document_id` + `evidence_text` fields (needed for the viewer below)
+
+### New: citation → PDF viewer (Clinical Chat)
+- [x] `GET /api/documents/{document_id}/file` — authenticated, `_document_authorized`-checked PDF streaming endpoint
+- [x] `PdfViewerPanel.tsx` (react-pdf/pdf.js) — opens on citation click, jumps to the cited page, zoom/page controls, attempts text-layer highlighting of the citation's evidence text (skipped for whole-page narrative citations — shows full text in the panel instead)
+- [x] `ChatMessage.tsx` citations are now clickable when PDF-backed (`document_id` present)
+
+### Verification
+- [x] Full end-to-end reproduction against a fresh synthetic fixture: upload → correct name/gender extraction → free-text name question → ANSWERED with correct citation (document_id, page, evidence_text) → authenticated file-fetch returns byte-identical PDF
+- [x] Authorization re-verified: unassigned nurse gets DENIED for the same name-based question and 403 on the file endpoint directly
+- [x] 6 new backend tests (`tests/test_pdf_retrieval_fix.py`, plus 2 rewritten duplicate-upload tests in `tests/test_upload.py`) — **49/49 backend tests passing**, dev server stopped first (Qdrant lock)
+- [x] Frontend production build clean (`npm run build`)
+- [ ] Manual browser click-through of the new PDF viewer not done — no browser automation tool available; verified via live API calls (byte-identical file fetch) and clean build instead
+
+### Known limitation
+A patient record created before this fix keeps whatever garbled name the old parser stored — no data-migration script re-runs identity extraction against already-ingested patients. Re-uploading an old document only repairs its indexing state, not a patient row's already-stored name fields.
+
 ## Last Updated
 2026-10-09

@@ -6,13 +6,14 @@
 - [ ] Switch to real PostgreSQL — brew finished installing postgresql@16; not yet migrated over (still on SQLite)
 - [ ] Manual browser click-through of the frontend before the jury demo (no browser automation tool was available this session; verified via production build + dev-server transform + live curl/API smoke tests instead)
 
-## Next push (2026-10-09 UI/UX + Document Intelligence + Hospital Insights)
-- [ ] Commit and push this iteration's changes (sidebar/routing redesign, Document Intelligence, Hospital Insights, the `SourceDocument.patient_id` and OCR-persistence fixes, 12 new tests, doc updates above)
+## Next push (2026-10-09 UI/UX + Document Intelligence + Hospital Insights + PDF retrieval fix)
+- [ ] Commit and push this iteration's changes (sidebar/routing redesign, Document Intelligence, Hospital Insights, the `SourceDocument.patient_id`/OCR-persistence/uploader-assignment fixes, the PDF retrieval root-cause fixes + citation PDF viewer, 18 new tests, doc updates above)
 
 ## Frontend — remaining
 - [ ] Admin retrieval-debug panel UI (backend already returns the `debug` block to ADMIN on `/api/rag/query` — just needs an expandable "Retrieval Details" section)
 - [x] Live ingestion status display — `GET /api/documents/{id}/status` + `DocumentProcessingStatus.tsx` on the new Document Intelligence page reads the persisted `ingestion_jobs` state rather than only the upload response; the original small `UploadDialog` on the Patients page still just shows the final result (not revisited — Document Intelligence is the primary upload surface now)
-- [ ] A relevance score threshold on retrieval so an authorized-but-irrelevant top chunk doesn't get returned as if it answered the question (see Known Issues in PROGRESS.md)
+- [x] A relevance score threshold on retrieval so an authorized-but-irrelevant top chunk doesn't get returned as if it answered the question — `RAG_SCORE_THRESHOLD` default raised to 0.35 and a falsy-coalescing bug that silently disabled it fixed (2026-10-09, see progress/DECISIONS.md "PDF retrieval fix")
+- [ ] The citation → PDF viewer is only wired into Clinical Chat (`AssistantPanel.tsx`); Document Intelligence's own per-document Q&A panel (`DocumentQuestionPanel.tsx`) doesn't show it yet — that page's list/Q&A grid would need restructuring to fit a third column
 
 ## Phase 3 — remaining
 - [ ] Optional reranking / hybrid lexical search (explicitly optional per spec — skip unless it demonstrably improves answers)
@@ -28,6 +29,8 @@
 - [ ] OCR for scanned/image-only PDFs — still not implemented; such an upload is now persisted with `status=NEEDS_REVIEW` and a clear explanation instead of being silently discarded (2026-10-09 fix), but there is still no path from "scanned PDF" to "extractable text"
 - [ ] `document_acls` is modeled but not yet populated or enforced anywhere — current authorization runs entirely on role + record_type/sensitivity + patient_assignments, which already covers every acceptance test; document-level ACLs would add per-document overrides on top of that if needed later
 - [ ] Ambiguous new-patient matches (PDF upload) are created as new rows rather than flagged for review (no review UI yet)
+- [ ] No data-migration script to re-run identity extraction against patients created before the 2026-10-09 identity-extraction fix — such a patient keeps whatever garbled name the old per-line-only parser stored; re-uploading the same document only repairs its indexing state, not the patient row's name fields
+- [ ] Text-layer citation highlighting only engages for evidence under 500 characters — a whole-page narrative citation (the common case for a document with no structured fields, e.g. a lab report) opens the right page but doesn't highlight a specific passage, since "highlighting" its own full-page evidence_text would mean highlighting the entire page
 
 ## Housekeeping
 - [x] Synthea CSV import verified against documented row counts

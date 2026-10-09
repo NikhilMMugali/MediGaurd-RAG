@@ -11,11 +11,11 @@
 4. PDF TEXT EXTRACTION   PyMuPDF per-page text; pdfplumber for tables    [implemented]
 5. PAGE PRESERVATION    page_number kept on every extracted unit         [implemented]
 6. SECTION/TABLE DETECTION  heading/table detection                      [not yet — current parser matches "Label: Value" lines directly, see progress/DECISIONS.md]
-7. STRUCTURED INFO EXTRACTION  rule-based "Label: Value" line parser     [implemented — app/ingestion/pdf_mapper.py::extract_patient_document_data]
+7. STRUCTURED INFO EXTRACTION  rule-based "Label: Value" line parser     [implemented — app/ingestion/pdf_mapper.py::extract_patient_document_data; a per-line parser alone mangles a real-world header line that packs two fields onto one line ("Name : X Reg. No. : Y") — `_extract_identity_fallback` recovers a clean name/registration-id/gender from such lines via field-boundary-aware regexes, generic to any document using that layout, never keyed to one patient's name (2026-10-09 fix, docs/DECISIONS.md "PDF retrieval fix")]
 8. SCHEMA MAPPING        map to patients/conditions/medications/allergies/procedures/encounters/claims [implemented — app/ingestion/pdf_mapper.py::map_to_database]
 9. VALIDATION            Pydantic intermediate schema (app/schemas/pdf_normalization.py) [implemented]
 10. DATABASE INSERTION   insert rows, stamped with source_type=UPLOADED_PDF + source_document_id [implemented; new-patient dedup via external_patient_id/name]
-11. SCHEMA-AWARE KNOWLEDGE GENERATION  atomic + narrative chunks          [implemented for Synthea data (scripts/generate_knowledge_records.py, from the clean 100-patient dataset — see docs/CLEAN_DATASET.md for current counts) and for uploaded-PDF rows (app/ingestion/pdf_mapper.py — a knowledge_records row is created inline as each structured row is mapped, not a separate pass)]
+11. SCHEMA-AWARE KNOWLEDGE GENERATION  atomic + narrative chunks          [implemented for Synthea data (scripts/generate_knowledge_records.py, from the clean 100-patient dataset — see docs/CLEAN_DATASET.md for current counts) and for uploaded-PDF rows (app/ingestion/pdf_mapper.py — a knowledge_records row is created inline as each structured row is mapped, not a separate pass). **2026-10-09 fix**: every page's own text is now ALSO kept as a generic `record_type="document"` narrative knowledge record regardless of what (if anything) the structured parser recognized. Previously a document whose content didn't match any structured category — e.g. a lab report's test-result tables, which have no "Diagnosis:"/"Medication:" style lines at all — produced zero knowledge_records and was completely unretrievable despite a successful-looking upload (`records_created: 0, chunks_indexed: 0`, `status: COMPLETED`). See docs/DECISIONS.md "PDF retrieval fix" for the full root-cause writeup and docs/SECURITY_MODEL.md for why `"document"` had to be added to `CLINICAL_RECORD_TYPES`.]
 12. EMBEDDING            EmbeddingProvider                                [implemented — app/api/upload.py calls app/rag/indexing.py::index_records inline, in the same request, right after the structured rows commit]
 13. QDRANT UPSERT        chunk + full security metadata payload          [implemented — same call; a failure here is caught and deferred (job.error_message), never fails the already-committed upload]
 14. READY FOR RAG        immediately queryable                           [implemented — no app restart or separate script run needed; verified live via POST /api/documents/query and POST /api/rag/query]
@@ -42,6 +42,32 @@ User question + document_id → app.api.upload::query_document
       must match this document, so only this document's own chunks can
       ever answer the question
    6. Citation validation, audit log, response — identical to /api/rag/query
+```
+
+## Citation → PDF viewer flow (section 10, 2026-10-09)
+
+```text
+User clicks a PDF-backed citation in Clinical Chat (ChatMessage.tsx)
+   1. Frontend already has, from the citation object: document_id, page,
+      file_name, evidence_text — no extra request needed to know WHERE to
+      open
+   2. PdfViewerPanel fetches GET /api/documents/{document_id}/file with the
+      user's Authorization header (apiRequestBlob) → an authenticated
+      fetch, never a plain <iframe src>/<a href>, which couldn't carry that
+      header at all
+   3. Backend re-checks _document_authorized() before streaming a single
+      byte — the same check as every other document endpoint
+   4. Frontend turns the response into a blob object URL, renders it via
+      react-pdf (pdf.js), and jumps straight to the cited page
+   5. Text-layer highlighting (customTextRenderer): each on-page text
+      fragment is checked for whether it's a substring of the citation's
+      own evidence_text; a match is wrapped in <mark>. Only attempted when
+      evidence_text is reasonably short (<=500 chars) — a whole-page
+      narrative citation's evidence_text IS that entire page, so
+      "highlighting" it would mean highlighting the whole page, which is
+      correct but not a useful visual cue; in that case the page still
+      opens and the full evidence text is shown in the panel below instead
+      (the explicit fallback this section allows for)
 ```
 
 ## Hospital Insights flow (section 6C)

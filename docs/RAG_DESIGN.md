@@ -11,12 +11,42 @@ Both newer AI Assistant features (section 4/5/6) sit on top of this same pipelin
 - **Document Intelligence Q&A** (`POST /api/documents/query`) calls `run_query(..., document_id=...)` — the exact function below, with one extra Qdrant/SQL condition (`source_document_id`) layered on top of the normal authorization filter. Same authorization, same citation validation, same audit log; see `docs/DATA_FLOW.md` "Document-scoped Q&A flow."
 - **Hospital Insights** (`app/rag/insights.py`) does *not* call this pipeline — it is SQL-only for every number it reports, by design (section 6C: "SQL is the source of truth for numeric metrics"). It reuses `build_authorization_context` (the same function `_authorize_and_classify` calls here) so its scoping can never diverge from chat/document authorization, and reuses `get_llm_provider`/citation validation only to narrate already-computed metrics, never to retrieve or compute them. See `docs/DATA_FLOW.md` "Hospital Insights flow."
 
+## Patient-name resolution and the relevance floor (2026-10-09 fix)
+
+Two gaps were found and fixed while reproducing a real reported failure
+("tell me about <patient name>" answering "no information" while showing
+unrelated patients' records as "sources" — see `docs/DECISIONS.md` "PDF
+retrieval fix" for the full root-cause writeup):
+
+1. `resolve_patient_reference` only ever recognized a `Pxxx` display id or a
+   pasted UUID — a question naming a patient by their actual name had no
+   resolution path at all, and silently fell through to an *unscoped*
+   semantic search (no patient filter) across every patient the role can
+   see. `_resolve_patient_by_name` now matches an exact, normalized full
+   name against real `Patient` rows as a fallback; a wrong/no match simply
+   fails to resolve (falls through to the existing "no context" handling)
+   — it can never grant access beyond what the subsequent authorization
+   check already allows, since that check runs identically afterward
+   regardless of how the patient was identified.
+2. `RAG_SCORE_THRESHOLD` defaulted to `0.0`, and `VectorStore.search()` had
+   `score_threshold=score_threshold or None` — Python falsiness, not a
+   deliberate sentinel, silently discarded that configured threshold
+   (`0.0 or None` → `None`) regardless of what it was actually set to. No
+   relevance floor was ever really applied by any caller. Fixed: the
+   default is now `0.35` (cosine, embeddings are normalized) and the
+   falsy-coalescing is gone — `None` is the real "no filter" value now. The
+   known-patient SQL fast path applies the same floor to its own
+   dot-product ranking (skipped for recency queries, where the score is
+   dominated by recency rather than topical similarity — see
+   `_retrieve_for_known_patient`).
+
 ## Pipeline (semantic route)
 
 ```text
 User question
      ↓ patient-context resolution (resolve_patient_reference: UI's
-         Pxxx display id, or a pasted UUID, -> the real internal id)
+         Pxxx display id, a pasted UUID, or — as of 2026-10-09 — an exact
+         normalized patient full name -> the real internal id)
      ↓ AuthorizationContext (built from PostgreSQL: role, department,
          ward_ids, assigned_patient_ids, allowed_record_types,
          allowed_sensitivity_levels, allowed_document_ids)
