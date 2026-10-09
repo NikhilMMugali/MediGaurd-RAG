@@ -65,6 +65,7 @@ def test_upload_maps_new_patient_into_database(client, seeded_doctor, db_session
     schema (patients/conditions/medications/allergies), not just extracted
     text, and every created row must carry provenance back to the upload."""
     from app.models.hospital import Allergy, Condition, Medication, Patient
+    from app.models.ward import PatientAssignment
 
     token = _login(client, seeded_doctor)
     response = client.post(
@@ -86,6 +87,18 @@ def test_upload_maps_new_patient_into_database(client, seeded_doctor, db_session
     assert condition.description == "Hypertension"
     assert condition.source_document_id == document_id
 
+    # Regression: a brand-new patient with no PatientAssignment row at all
+    # previously left the uploader unable to ask about them afterward (chat
+    # and document Q&A both deny a patient-scoped role for an "unassigned"
+    # patient) — the uploader must become the attending by default.
+    assignment = (
+        db_session.query(PatientAssignment)
+        .filter(PatientAssignment.patient_id == patient.id, PatientAssignment.user_id == seeded_doctor.id)
+        .first()
+    )
+    assert assignment is not None
+    assert assignment.active is True
+
     medication = db_session.query(Medication).filter(Medication.patient == patient.id).first()
     assert medication is not None
     assert medication.description == "Metformin"
@@ -93,6 +106,31 @@ def test_upload_maps_new_patient_into_database(client, seeded_doctor, db_session
     allergy = db_session.query(Allergy).filter(Allergy.patient == patient.id).first()
     assert allergy is not None
     assert allergy.description == "Penicillin"
+
+
+def test_uploader_can_query_the_newly_created_patient_afterward(client, seeded_doctor):
+    """End-to-end regression for the exact bug reported: upload a PDF that
+    introduces a new patient, then immediately ask about that patient
+    through the normal chat RAG endpoint — must be ANSWERED, never DENIED."""
+    token = _login(client, seeded_doctor)
+    upload_response = client.post(
+        "/api/documents/upload",
+        files={"file": ("patient_p999.pdf", _make_pdf_bytes(), "application/pdf")},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert upload_response.status_code == 200
+    patient_id = upload_response.json()["patient_id"]
+    assert patient_id is not None
+
+    query_response = client.post(
+        "/api/rag/query",
+        json={"question": "What conditions does this patient have?", "patient_id": patient_id},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert query_response.status_code == 200
+    body = query_response.json()
+    assert body["status"] == "ANSWERED"
+    assert "Hypertension" in body["answer"]
 
 
 def test_upload_rejects_duplicate_file(client, seeded_doctor):

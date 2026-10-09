@@ -89,13 +89,17 @@ def extract_patient_document_data(extraction: PdfExtractionResult) -> PatientDoc
     return data
 
 
-def find_or_create_patient(db: Session, info: PatientInfo | None, source_document_id: str) -> Patient | None:
+def find_or_create_patient(db: Session, info: PatientInfo | None, source_document_id: str) -> tuple[Patient | None, bool]:
     """Deduplicates on external_patient_id + name; never silently merges on
     name alone. An ambiguous case (same name, different external id) still
     creates a new row — flagging for review is Phase 3+ UI work, not a
-    reason to guess here."""
+    reason to guess here. Returns (patient, created) — the caller uses
+    `created` to decide whether the uploader needs a new PatientAssignment
+    (see app.api.upload — a brand-new patient has no assignment at all yet,
+    which previously left the very person who just uploaded their records
+    unable to ask about them)."""
     if info is None or not (info.external_patient_id or info.first or info.last):
-        return None
+        return None, False
 
     existing = None
     if info.external_patient_id:
@@ -109,7 +113,7 @@ def find_or_create_patient(db: Session, info: PatientInfo | None, source_documen
             .first()
         )
     if existing is not None:
-        return existing
+        return existing, False
 
     patient = Patient(
         id=new_uuid(),
@@ -122,7 +126,7 @@ def find_or_create_patient(db: Session, info: PatientInfo | None, source_documen
     )
     db.add(patient)
     db.flush()
-    return patient
+    return patient, True
 
 
 def _next_display_id(db: Session) -> str:
@@ -177,12 +181,14 @@ def _add_knowledge_record(
     return kr_id
 
 
-def map_to_database(db: Session, data: PatientDocumentData, source_document_id: str) -> tuple[int, list[str], Patient | None]:
+def map_to_database(
+    db: Session, data: PatientDocumentData, source_document_id: str
+) -> tuple[int, list[str], Patient | None, bool]:
     """Inserts every mappable item as a real row in the canonical tables,
     stamped with source_type=UPLOADED_PDF + source_document_id + source_page,
     and a matching knowledge_records row so it's immediately indexable.
-    Returns (records_created, new_knowledge_record_ids, patient)."""
-    patient = find_or_create_patient(db, data.patient, source_document_id)
+    Returns (records_created, new_knowledge_record_ids, patient, patient_created)."""
+    patient, patient_created = find_or_create_patient(db, data.patient, source_document_id)
     patient_id = patient.id if patient else None
     created = 0
     knowledge_record_ids: list[str] = []
@@ -346,4 +352,4 @@ def map_to_database(db: Session, data: PatientDocumentData, source_document_id: 
         created += 1
 
     db.commit()
-    return created, knowledge_record_ids, patient
+    return created, knowledge_record_ids, patient, patient_created

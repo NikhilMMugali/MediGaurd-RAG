@@ -15,6 +15,7 @@ from app.models.documents import IngestionJob, KnowledgeRecord, SourceDocument
 from app.models.hospital import Patient
 from app.models.provenance import new_uuid
 from app.models.user import RoleEnum, User
+from app.models.ward import PatientAssignment
 from app.rag.indexing import index_records
 from app.rag.pipeline import run_query
 from app.schemas.documents import (
@@ -137,7 +138,7 @@ async def upload_document(
     normalized = extract_patient_document_data(result)
 
     try:
-        records_created, knowledge_record_ids, patient = map_to_database(db, normalized, document.id)
+        records_created, knowledge_record_ids, patient, patient_created = map_to_database(db, normalized, document.id)
     except Exception as exc:  # defend against a malformed mapping, not a reason to lose the upload
         job.status = "FAILED"
         job.error_message = str(exc)
@@ -170,6 +171,23 @@ async def upload_document(
     # authorization (a doctor's assigned-patient scope has nothing to match
     # against) and the "Available Documents" patient filter.
     document.patient_id = patient.id if patient else None
+
+    # A brand-new patient (not one of the clean dataset's existing P001..P100)
+    # has no patient_assignments row at all — without this, the very user who
+    # just uploaded the record could never ask about it afterward: a
+    # patient-scoped role's assigned_patient_ids wouldn't include a patient
+    # nobody has ever been assigned to, so both chat and document Q&A would
+    # deny them. The uploader becomes that patient's attending by default,
+    # same as any other real-world "who admitted this patient" assignment.
+    if patient_created and patient is not None:
+        db.add(
+            PatientAssignment(
+                id=new_uuid(),
+                patient_id=patient.id,
+                user_id=user.id,
+                assignment_type="attending",
+            )
+        )
     db.commit()
 
     return UploadResponse(
