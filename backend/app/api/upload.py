@@ -14,9 +14,9 @@ from app.ingestion.pdf_extractor import PdfExtractionError, extract_pdf
 from app.ingestion.pdf_mapper import (
     _add_knowledge_record,
     extract_patient_document_data,
-    find_or_create_patient,
     map_to_database,
     narrative_sections_for_document,
+    repair_patient_link,
 )
 from app.models.documents import IngestionJob, KnowledgeRecord, SourceDocument
 from app.models.hospital import Patient
@@ -121,21 +121,9 @@ def _handle_duplicate_upload(db: Session, user: User, existing: SourceDocument, 
     # structured rows would duplicate them.
     patient_linked_now = False
     if needs_patient_link:
-        normalized = extract_patient_document_data(result)
-        patient, patient_created = find_or_create_patient(db, normalized.patient, existing.id)
-        if patient is not None:
-            existing.patient_id = patient.id
-            # Any chunk already indexed under the missing association gets
-            # the correct patient_id too — it's re-indexed below so its
-            # Qdrant payload (which bakes patient_id in at upsert time)
-            # stops being stale as well.
-            db.query(KnowledgeRecord).filter(
-                KnowledgeRecord.source_document_id == existing.id, KnowledgeRecord.patient_id.is_(None)
-            ).update({"patient_id": patient.id})
-            if patient_created:
-                db.add(PatientAssignment(id=new_uuid(), patient_id=patient.id, user_id=user.id, assignment_type="attending"))
-            db.commit()
-            patient_linked_now = True
+        # Shared with scripts/backfill_pdf_documents.py — one tested
+        # identity-resolution-and-linking implementation, not two.
+        patient_linked_now = repair_patient_link(db, existing, result, assign_user_id=user.id) is not None
 
     display_ref = _patient_display_id(db, existing.patient_id) or "Unknown"
 

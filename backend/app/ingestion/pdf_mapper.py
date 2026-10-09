@@ -29,9 +29,10 @@ import re
 
 from sqlalchemy.orm import Session
 
-from app.models.documents import KnowledgeRecord
+from app.models.documents import KnowledgeRecord, SourceDocument
 from app.models.hospital import Allergy, Claim, Condition, Encounter, Medication, Patient, Procedure
 from app.models.provenance import new_uuid
+from app.models.ward import PatientAssignment
 from app.schemas.ingestion import ExtractedPage, PdfExtractionResult
 from app.schemas.pdf_normalization import (
     AllergyItem,
@@ -68,12 +69,29 @@ _GENDER_FIELD_RE = re.compile(r"\bGender\s*:?\s*(Male|Female|Other)\b", re.IGNOR
 # Matched by normalizing each line (strip, lowercase, drop a trailing colon)
 # and checking membership in these label sets, generic to the layout and
 # never keyed to any specific patient's name or id.
-_NEXT_LINE_NAME_LABELS = {"patient name", "name", "full name"}
+#
+# Deliberately NOT including a bare "name" here (found via a real false
+# positive during backfill testing: a quiz PDF's table had a row literally
+# titled "The second name" — Python variable-aliasing trivia, nothing to do
+# with a patient — table-extracted as "name" alone on one line followed by
+# its answer "[1, 2, 3, 4]" on the next, which a bare "name" label matched
+# as if it were a patient's name). Only multi-word, identity-form-specific
+# phrasings are used, and `_looks_like_a_name` below rejects an
+# implausible value regardless.
+_NEXT_LINE_NAME_LABELS = {"patient name", "full name"}
 _NEXT_LINE_ID_LABELS = {
     "patient id", "patient_id", "demo patient id", "mrn", "reg no", "reg. no",
     "registration no", "registration number", "patient registration number",
 }
 _NEXT_LINE_GENDER_LABELS = {"gender", "sex"}
+_PLAUSIBLE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z.'\-]*(?:\s+[A-Za-z][A-Za-z.'\-]*){0,4}$")
+
+
+def _looks_like_a_name(value: str) -> bool:
+    """Letters/spaces/common name punctuation only, 2-5 words — rejects
+    table/code content (digits, brackets, commas) a label match might
+    otherwise accept on a non-medical document."""
+    return bool(_PLAUSIBLE_NAME_RE.match(value)) and 2 <= len(value) <= 60
 
 
 def _extract_label_next_line_fields(pages: list[ExtractedPage]) -> tuple[str | None, str | None, str | None]:
@@ -98,7 +116,7 @@ def _extract_label_next_line_fields(pages: list[ExtractedPage]) -> tuple[str | N
             value = lines[i + 1].strip()
             if not value:
                 continue
-            if name is None and key in _NEXT_LINE_NAME_LABELS:
+            if name is None and key in _NEXT_LINE_NAME_LABELS and _looks_like_a_name(value):
                 name = _clean_identity_value(value)
             elif external_id is None and key in _NEXT_LINE_ID_LABELS:
                 external_id = _clean_identity_value(value)
@@ -319,6 +337,64 @@ def narrative_sections_for_document(result: PdfExtractionResult) -> list[Narrati
     just the narrative knowledge records (never the structured rows, which
     are not idempotent to re-insert) without re-running the full extractor."""
     return extract_patient_document_data(result).narrative_sections
+
+
+def repair_patient_link(
+    db: Session, document: SourceDocument, result: PdfExtractionResult, assign_user_id: str | None
+) -> Patient | None:
+    """Shared by two callers that both need to fix a document whose patient
+    was never resolved: app.api.upload's duplicate-upload repair path (a
+    user re-uploads a document that's already in this broken state) and
+    scripts/backfill_pdf_documents.py (an offline sweep over every document
+    in that state, without anyone re-uploading anything). One tested
+    implementation, not two divergent ones.
+
+    Re-runs identity extraction against already-extracted PDF content, links
+    the document to the resolved patient, and backfills `patient_id` onto
+    any of that document's existing knowledge_records that still have none.
+    Returns the resolved Patient, or None if identity still can't be
+    determined (or the document already had a patient_id — nothing to do).
+
+    Idempotent: a document that already has a patient_id is a no-op; a
+    patient that already exists (matched by external_patient_id or name) is
+    reused via `find_or_create_patient`, never duplicated; an assignment is
+    only created for `assign_user_id` when the patient was newly created AND
+    no active assignment for that (patient, user) pair already exists.
+
+    Deliberately does NOT re-index into Qdrant — this module has no
+    dependency on the embedding/vector-store services (app.rag/app.services
+    import app.ingestion, never the reverse). The caller re-indexes any
+    knowledge_records this function touched."""
+    if document.patient_id is not None:
+        return None
+
+    normalized = extract_patient_document_data(result)
+    patient, patient_created = find_or_create_patient(db, normalized.patient, document.id)
+    if patient is None:
+        return None
+
+    document.patient_id = patient.id
+    db.query(KnowledgeRecord).filter(
+        KnowledgeRecord.source_document_id == document.id, KnowledgeRecord.patient_id.is_(None)
+    ).update({"patient_id": patient.id})
+
+    if patient_created and assign_user_id:
+        existing_assignment = (
+            db.query(PatientAssignment)
+            .filter(
+                PatientAssignment.patient_id == patient.id,
+                PatientAssignment.user_id == assign_user_id,
+                PatientAssignment.active.is_(True),
+            )
+            .first()
+        )
+        if existing_assignment is None:
+            db.add(
+                PatientAssignment(id=new_uuid(), patient_id=patient.id, user_id=assign_user_id, assignment_type="attending")
+            )
+
+    db.commit()
+    return patient
 
 
 def map_to_database(

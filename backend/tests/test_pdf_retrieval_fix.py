@@ -12,7 +12,8 @@ import pytest
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 
-from app.ingestion.pdf_mapper import extract_patient_document_data
+from app.ingestion.pdf_mapper import extract_patient_document_data, repair_patient_link
+from app.models.documents import KnowledgeRecord, SourceDocument
 from app.models.hospital import Patient
 from app.models.provenance import new_uuid
 from app.models.ward import PatientAssignment
@@ -103,6 +104,29 @@ def test_label_next_line_fallback_recovers_identity_with_no_colon_at_all():
     assert data.patient.external_patient_id == "DEMO-PT-2026-1042"
     assert data.patient.gender == "Female"
     assert len(data.narrative_sections) == 1
+
+
+# Real false positive found while verifying the backfill script against the
+# live dev database: an unrelated, non-medical quiz PDF ("Guess the
+# Output Solutions") has a table row titled "The second name" — Python
+# variable-aliasing trivia — which PDF table extraction linearizes as "name"
+# alone on one line followed by its answer "[1, 2, 3, 4]" on the next. A
+# bare "name" label would wrongly treat that as a patient's name.
+_QUIZ_PDF_PAGE_TEXT = (
+    "Guess the Output: Solutions\n"
+    "Oct 2, 2026\n"
+    "Answer key\n"
+    "7\n"
+    "The second\n"
+    "name\n"
+    "[1, 2, 3, 4]\n"
+    "b = a makes a second name, not a copy\n"
+)
+
+
+def test_label_next_line_fallback_does_not_misfire_on_unrelated_non_medical_pdf():
+    data = extract_patient_document_data(_extraction_result(_QUIZ_PDF_PAGE_TEXT))
+    assert data.patient is None
 
 
 def test_resolve_patient_by_name_matches_exact_normalized_full_name(db_session):
@@ -243,3 +267,88 @@ def test_known_patient_fast_path_has_no_relevance_floor(db_session, seeded_docto
 
     assert result.status == "ANSWERED"
     assert result.retrieved_count == 1
+
+
+def _broken_document(db_session, uploaded_by: str) -> SourceDocument:
+    doc = SourceDocument(
+        id=new_uuid(),
+        file_name="legacy.pdf",
+        file_hash=new_uuid(),
+        source_type="UPLOADED_PDF",
+        uploaded_by=uploaded_by,
+        status="COMPLETED",
+        patient_id=None,
+    )
+    db_session.add(doc)
+    db_session.add(
+        KnowledgeRecord(
+            id=new_uuid(),
+            patient_id=None,
+            record_type="document",
+            source_type="UPLOADED_PDF",
+            source_document_id=doc.id,
+            source_page=1,
+            source_section="document",
+            sensitivity="clinical",
+            content="Patient: Unknown\nDocument page 1\n\n" + _FORM_LAYOUT_PAGE_TEXT,
+        )
+    )
+    db_session.commit()
+    return doc
+
+
+def test_repair_patient_link_is_a_no_op_once_already_linked(db_session, seeded_doctor):
+    """The backfill script (scripts/backfill_pdf_documents.py) must be safe
+    to re-run — a document that's already linked should never be touched
+    again, and calling the shared repair function on it directly must be an
+    explicit no-op (returns None), not a silent re-match that could
+    duplicate an assignment."""
+    doc = _broken_document(db_session, seeded_doctor.id)
+    result = _extraction_result(_FORM_LAYOUT_PAGE_TEXT)
+
+    first = repair_patient_link(db_session, doc, result, assign_user_id=seeded_doctor.id)
+    assert first is not None
+    assert doc.patient_id == first.id
+
+    second = repair_patient_link(db_session, doc, result, assign_user_id=seeded_doctor.id)
+    assert second is None  # already linked — nothing to repair, not re-matched
+
+
+def test_repair_patient_link_backfills_existing_chunks_and_assigns_uploader(db_session, seeded_doctor):
+    doc = _broken_document(db_session, seeded_doctor.id)
+    result = _extraction_result(_FORM_LAYOUT_PAGE_TEXT)
+
+    patient = repair_patient_link(db_session, doc, result, assign_user_id=seeded_doctor.id)
+
+    assert patient is not None
+    assert patient.first == "KAVYA"
+    kr = db_session.query(KnowledgeRecord).filter(KnowledgeRecord.source_document_id == doc.id).first()
+    assert kr.patient_id == patient.id
+
+    assignment = (
+        db_session.query(PatientAssignment)
+        .filter(PatientAssignment.patient_id == patient.id, PatientAssignment.user_id == seeded_doctor.id)
+        .first()
+    )
+    assert assignment is not None
+
+
+def test_repair_patient_link_does_not_duplicate_assignment_across_two_documents(db_session, seeded_doctor):
+    """Two different broken documents for the SAME patient (e.g. two
+    reports from the same demo fixture), repaired in the same backfill
+    run, must not create two PatientAssignment rows for the same
+    (patient, uploader) pair."""
+    doc1 = _broken_document(db_session, seeded_doctor.id)
+    doc2 = _broken_document(db_session, seeded_doctor.id)
+    result = _extraction_result(_FORM_LAYOUT_PAGE_TEXT)
+
+    patient1 = repair_patient_link(db_session, doc1, result, assign_user_id=seeded_doctor.id)
+    patient2 = repair_patient_link(db_session, doc2, result, assign_user_id=seeded_doctor.id)
+
+    assert patient1.id == patient2.id  # matched the same existing patient, not duplicated
+    assignments = (
+        db_session.query(PatientAssignment)
+        .filter(PatientAssignment.patient_id == patient1.id, PatientAssignment.user_id == seeded_doctor.id)
+        .all()
+    )
+    assert len(assignments) == 1
