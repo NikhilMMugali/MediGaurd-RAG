@@ -107,5 +107,32 @@ Fixed the "answers look like raw database dumps" complaint end to end:
 
 See progress/DECISIONS.md for the full architecture writeup and docs/CLEAN_DATASET.md for the dataset build details.
 
+## 2026-10-09 — UI/UX redesign + Document Intelligence + Hospital Insights
+
+### Navigation / UI redesign
+- [x] React Router wired up for real (previously local `tab` state) — `/patients`, `/assistant/chat`, `/assistant/documents`, `/assistant/insights`
+- [x] Sidebar redesigned: General/AI Assistant grouped nav, active-route highlighting, collapsible AI Assistant group, Document Intelligence link hidden from roles that can't use it (FINANCE/RECEPTION)
+- [x] Mobile layout: sidebar hidden below `md`, replaced with a top bar (menu toggle + page title + role badge) and a slide-out overlay nav
+- [x] Selected-patient context now flows through React Router's `Outlet` context instead of prop-drilling from a single top-level component
+
+### Document Intelligence (new, `/assistant/documents`)
+- [x] Fixed a real pre-existing bug: `SourceDocument.patient_id` was never actually set on upload — document-level authorization and patient filtering were silently broken against this column
+- [x] Fixed OCR handling: a scanned/no-text PDF previously raised a 422 with **nothing persisted at all**; now the document and file bytes are saved with `status=NEEDS_REVIEW` and a clear explanation, matching the "preserve the upload safely" requirement
+- [x] New endpoints: `GET /api/documents` (authorized list), `GET /api/documents/limits`, `GET /api/documents/{id}/status`, `POST /api/documents/query` (document-scoped Q&A) — all in `app/api/upload.py`, reusing the existing upload router/role gate
+- [x] `app/rag/pipeline.py::run_query` gained an optional `document_id` param, threaded into both the Qdrant filter (`build_retrieval_filter`) and the known-patient SQL fast path (`_retrieve_for_known_patient`) — document Q&A reuses the exact same authorization + citation-validation + audit-log code as chat, scoped additionally to one document's chunks
+- [x] Frontend: `DocumentUploader` (drag-and-drop, backend-driven size limit), `DocumentProcessingStatus` (reads the persisted record, not an optimistic guess), `DocumentList` (search by filename/patient id), `DocumentQuestionPanel` (per-document chat reusing `ChatMessage`)
+- [x] Hardened `_validate_citations`' regex to also catch full-width bracket citations (`〔SOURCE_1〕`) the LLM occasionally emits — found during live testing, same function used by chat, documents, and insights
+
+### Hospital Insights (new, `/assistant/insights`)
+- [x] New `app/rag/insights.py` — every metric is a real SQL aggregate, scoped through the exact same `AuthorizationContext` as chat/documents (role-wide for FINANCE/RECEPTION, `assigned_patient_ids`-filtered for DOCTOR/NURSE, system-wide for ADMIN); a role with nothing to summarize gets an honest empty-state note, never a fabricated zero
+- [x] `POST /api/insights/query` packages those metrics as a single `[SOURCE_1]` evidence block — the LLM narrates, it structurally cannot cite a second (invented) source; the no-metrics case never calls the LLM at all
+- [x] Frontend: KPI cards, a plain CSS bar-list breakdown (no charting library added), and an "Ask about these insights" panel
+
+### Verification
+- [x] Live end-to-end smoke test against the real running backend: login as all 5 roles, insights overview per role, a real PDF upload → list → status → document-scoped Q&A with a correct citation, and authorization denials (unassigned nurse → 403, finance → 403) — see this session's transcript
+- [x] 12 new focused backend tests (`tests/test_documents.py`, `tests/test_insights.py`) covering the authorization properties above; full suite run with the dev server stopped first (embedded Qdrant's single-writer lock) — **42/42 passing, zero regressions**
+- [x] Frontend production build (`npm run build`) and lint (`npm run lint`) both clean
+- [ ] Manual browser click-through of the new UI not done this pass either — still no browser automation tool available; verified via build + live curl smoke tests instead (see TODO.md)
+
 ## Last Updated
-2026-10-08
+2026-10-09

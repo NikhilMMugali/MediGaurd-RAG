@@ -4,6 +4,13 @@
 >
 > **Hybrid retrieval update (2026-10-08):** the pipeline below describes the *semantic* path only. As of the "clean dataset + hybrid RAG" iteration, `app/rag/query_classification.py` first decides a `route` — `structured` (an exact SQL lookup in `app/rag/structured_answers.py` answers directly, no Qdrant/LLM call at all), `summary` (a deterministic cross-domain rollup, also no LLM), or `semantic` (the pipeline below). Authorization (`AuthorizationContext` + the record-type intersection) is computed once in `_authorize_and_classify()` and applies identically to all three routes — see progress/DECISIONS.md "Hybrid retrieval."
 
+## Reused by Document Intelligence and Hospital Insights
+
+Both newer AI Assistant features (section 4/5/6) sit on top of this same pipeline rather than a parallel one:
+
+- **Document Intelligence Q&A** (`POST /api/documents/query`) calls `run_query(..., document_id=...)` — the exact function below, with one extra Qdrant/SQL condition (`source_document_id`) layered on top of the normal authorization filter. Same authorization, same citation validation, same audit log; see `docs/DATA_FLOW.md` "Document-scoped Q&A flow."
+- **Hospital Insights** (`app/rag/insights.py`) does *not* call this pipeline — it is SQL-only for every number it reports, by design (section 6C: "SQL is the source of truth for numeric metrics"). It reuses `build_authorization_context` (the same function `_authorize_and_classify` calls here) so its scoping can never diverge from chat/document authorization, and reuses `get_llm_provider`/citation validation only to narrate already-computed metrics, never to retrieve or compute them. See `docs/DATA_FLOW.md` "Hospital Insights flow."
+
 ## Pipeline (semantic route)
 
 ```text

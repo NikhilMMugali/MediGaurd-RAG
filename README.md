@@ -26,20 +26,33 @@ Never: retrieve everything and ask the LLM to hide what's restricted. Full detai
 ## Features
 
 - Five server-verified roles: DOCTOR, NURSE, FINANCE, RECEPTION, ADMIN — a client-selected role must match the account's stored role or login is rejected.
-- Synthea-derived hospital database (18 CSVs, ~108 patients) as the structured source of truth in PostgreSQL.
-- PDF upload → extraction → schema mapping → database insertion → chunking → embedding → Qdrant indexing, immediately queryable.
-- Authorization enforced at the vector-retrieval layer via a pre-search Qdrant filter, not by post-filtering LLM output.
-- Every factual claim in an answer carries an exact citation (database record or PDF page/section).
+- Synthea-derived hospital database, narrowed to a clean, deterministic 100-patient demo dataset (`P001`–`P100`) — see [docs/CLEAN_DATASET.md](docs/CLEAN_DATASET.md).
+- Hybrid RAG: exact-fact questions (identity, medications, conditions, encounters, finance) answer directly from SQL, no LLM/Qdrant call — open-ended questions use Qdrant + Groq synthesis. See [docs/RAG_DESIGN.md](docs/RAG_DESIGN.md).
+- **Document Intelligence** (`/assistant/documents`) — upload, track, and ask questions about patient PDFs, grounded only in that document's own authorized chunks. PDF upload → extraction → schema mapping → database insertion → chunking → embedding → Qdrant indexing, all in one request, immediately queryable.
+- **Hospital Insights** (`/assistant/insights`) — role-aware KPIs computed entirely from SQL, with an LLM-narrated (never LLM-computed) summary.
+- Authorization enforced at the vector-retrieval layer via a pre-search Qdrant filter, not by post-filtering LLM output — applies identically across chat, Document Intelligence, and Hospital Insights.
+- Every factual claim in an answer carries an exact citation (database record or PDF page/section), resolved to a friendly label — never a raw internal UUID.
 - Audit logging of every query (user, role, query, retrieved sources, allow/deny outcome).
-- Admin debug view showing the authorization filter and which sources were retrieved vs. excluded.
+- Admin dashboard showing live (never hardcoded) counts plus recent uploads/security events.
 
 ## Architecture
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md).
 
 ```text
-Frontend (Next.js) → FastAPI backend → PostgreSQL (source of truth)
-                                     → Qdrant (vector + metadata index)
+Frontend (React + Vite) → FastAPI backend → PostgreSQL/SQLite (source of truth)
+                                           → Qdrant (vector + metadata index)
+```
+
+### Navigation
+
+```text
+MediGaurd
+├── Patients                      /patients
+└── AI Assistant
+    ├── Clinical Chat             /assistant/chat
+    ├── Document Intelligence     /assistant/documents   (DOCTOR/NURSE/ADMIN)
+    └── Hospital Insights         /assistant/insights
 ```
 
 ## Tech Stack
@@ -118,7 +131,7 @@ cd backend
 pytest tests/ -v
 ```
 
-Phase 1 tests run against an in-memory SQLite database — no PostgreSQL required.
+Runs against an in-memory SQLite database — no PostgreSQL required. **Stop any locally running `uvicorn` process first** — qdrant-client's embedded local mode holds an exclusive file lock on `QDRANT_PATH`, and a handful of these tests open a real (temp-directory) Qdrant collection of their own; running them while the dev server also has the real collection open will crash whichever process opened it second (see `progress/DECISIONS.md`).
 
 ## Environment Variables
 
@@ -139,6 +152,8 @@ See [.env.example](.env.example) for the full list: app secret key, JWT settings
 - "What conditions does patient P001 have?" (DOCTOR → answered with citation; FINANCE → restricted)
 - "What is the outstanding amount for patient P001?" (FINANCE → answered with citation; DOCTOR → restricted)
 - "When was patient P001's last encounter?" (RECEPTION → answered with citation)
+- Document Intelligence: upload a patient PDF, then ask "Summarize this report." or "What medications are mentioned in this document?" — answered only from that document's own chunks.
+- Hospital Insights: "Summarize recent activity and highlight any data gaps." — every number in the answer traces back to a live SQL aggregate shown on the same page.
 
 ## Security Model
 

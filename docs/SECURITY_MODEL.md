@@ -34,6 +34,14 @@ This document complements [SECURITY.md](SECURITY.md) (which defines the role mat
 
 **Mechanism**: content-type/extension check, file-size cap (`MAX_UPLOAD_SIZE_MB`), and parsing via PyMuPDF (`backend/app/ingestion/pdf_extractor.py`) in a try/except boundary that converts any malformed/empty/scanned PDF into a clear `422` rather than a crash or a silently empty ingestion.
 
+## Threat: unauthorized document access via Document Intelligence
+
+**Mechanism**: `app.api.upload._document_authorized(ctx, doc, user_id)` is checked before the list, status, or query endpoint touches anything else. It denies unless the caller is `ADMIN`, the document's own uploader, or — for a patient-scoped role — the document's resolved patient is in `assigned_patient_ids`. `test_documents.py::test_document_query_denied_before_any_retrieval_for_unauthorized_document` asserts the `403` happens before `run_query` (and therefore before Qdrant or the LLM) is ever reached. A second test (`test_document_query_scopes_retrieval_to_the_named_document_only`) proves that even an authorized, correctly-scoped query for one document cannot surface a *different* document's chunks for the same patient — the `source_document_id` Qdrant filter is additive to every other authorization condition, never a replacement for them.
+
+## Threat: Hospital Insights aggregates across an unauthorized scope
+
+**Mechanism**: `app.rag.insights.build_overview` calls `build_authorization_context` and, for `DOCTOR`/`NURSE`, filters every SQL `COUNT`/`SUM` to `assigned_patient_ids` — there is no code path that aggregates over every patient for a patient-scoped role, regardless of how the question is phrased (section 6D "a doctor must never gain access to financial records solely by using natural language" — `DOCTOR`/`NURSE` simply have no finance metrics defined at all, matching their existing `ROLE_POLICY`). `test_insights.py::test_doctor_metrics_scoped_to_assigned_patients_only` seeds two patients, assigns only one, and asserts the unassigned patient's condition/medication rows are not counted.
+
 ## Residual/Phase-2+3 work
 
 - `document_acls` row-level checks for individually-shared uploaded documents.

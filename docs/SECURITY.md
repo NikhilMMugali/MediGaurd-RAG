@@ -99,6 +99,16 @@ Incorrect: "The patient has a serious condition, but I can't tell you what it is
 
 Every query writes an `audit_logs` row: `timestamp`, `user_id`, `role`, `query`, `retrieved_source_ids`, `result_status` (`ALLOWED` / `DENIED` / `NO_AUTHORIZED_CONTEXT` / `ERROR`), `denial_reason`. No secrets or full PHI payloads are stored in the log.
 
+## Document-level authorization (Document Intelligence)
+
+A `source_documents` row is visible — in the document list, its status endpoint, and document-scoped Q&A — only to: `ADMIN`; whoever uploaded it; or, for a patient-scoped role (`DOCTOR`/`NURSE`), anyone currently assigned to the patient the document resolved to. A document with no resolved patient (not yet matched to anyone) is visible only to its uploader and `ADMIN`, never to every clinical user by default (`app.api.upload._document_authorized`). This check runs before any retrieval — an unauthorized `document_id` gets `403` with zero DB rows or Qdrant points touched.
+
+Document-scoped Q&A (`POST /api/documents/query`) additionally narrows retrieval to that one document's own chunks (`source_document_id` added to the Qdrant filter / SQL fast-path query), on top of every normal record-type/sensitivity/patient-assignment condition — so an authorized user still can't have one document's content answer a question about another.
+
+## Hospital Insights authorization
+
+`GET /api/insights/overview` and `POST /api/insights/query` compute metrics using the exact same `AuthorizationContext` as chat/document retrieval (`app.rag.insights.build_overview`). A patient-scoped role's counts are always filtered to `assigned_patient_ids` — there is no "aggregate across all patients" path a `DOCTOR`/`NURSE` can reach, by natural language or otherwise. `FINANCE`/`RECEPTION` are not patient-scoped (same as their existing retrieval authorization), so their aggregates are role-wide by design, matching how chat queries already behave for those roles. The LLM is only ever given the metrics already computed by SQL, each tagged as a single citable source — it narrates them, it cannot introduce a number of its own under a fake citation.
+
 ## General security requirements
 
 - Passwords hashed with bcrypt (via passlib); never logged or stored in plaintext.

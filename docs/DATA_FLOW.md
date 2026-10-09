@@ -1,6 +1,6 @@
 # MediGaurd RAG — Data Flow
 
-> **Implementation status (Phase 2, 2026-10-08):** steps 1–10 below are implemented (`backend/app/api/upload.py`, `backend/app/ingestion/pdf_mapper.py`). Step 7's "structured info extraction" is currently a rule-based "Label: Value" line parser, not an LLM call — see progress/DECISIONS.md. Steps 11–14 (chunking beyond the schema-aware knowledge records already generated for Synthea data, embedding, Qdrant) are Phase 3.
+> **Implementation status (2026-10-09):** all 14 steps below are implemented end-to-end in a single upload request (`backend/app/api/upload.py`, `backend/app/ingestion/pdf_mapper.py`, `backend/app/rag/indexing.py`) — a successfully-mapped PDF is queryable immediately, no separate script run needed. Step 7's "structured info extraction" is a rule-based "Label: Value" line parser, not an LLM call — see progress/DECISIONS.md.
 
 ## PDF ingestion pipeline
 
@@ -16,12 +16,51 @@
 9. VALIDATION            Pydantic intermediate schema (app/schemas/pdf_normalization.py) [implemented]
 10. DATABASE INSERTION   insert rows, stamped with source_type=UPLOADED_PDF + source_document_id [implemented; new-patient dedup via external_patient_id/name]
 11. SCHEMA-AWARE KNOWLEDGE GENERATION  atomic + narrative chunks          [implemented for Synthea data (scripts/generate_knowledge_records.py, from the clean 100-patient dataset — see docs/CLEAN_DATASET.md for current counts) and for uploaded-PDF rows (app/ingestion/pdf_mapper.py — a knowledge_records row is created inline as each structured row is mapped, not a separate pass)]
-12. EMBEDDING            EmbeddingProvider                                [Phase 3]
-13. QDRANT UPSERT        chunk + full security metadata payload          [Phase 3]
-14. READY FOR RAG        immediately queryable                           [Phase 3]
+12. EMBEDDING            EmbeddingProvider                                [implemented — app/api/upload.py calls app/rag/indexing.py::index_records inline, in the same request, right after the structured rows commit]
+13. QDRANT UPSERT        chunk + full security metadata payload          [implemented — same call; a failure here is caught and deferred (job.error_message), never fails the already-committed upload]
+14. READY FOR RAG        immediately queryable                           [implemented — no app restart or separate script run needed; verified live via POST /api/documents/query and POST /api/rag/query]
 ```
 
-Each step's failure mode must produce a clear `ingestion_jobs.status = FAILED` with a reason, not a silent partial result. Status values: `RECEIVED, EXTRACTING, PARSING, MAPPING, VALIDATING, DATABASE_INSERT, CHUNKING, EMBEDDING, INDEXING, COMPLETED, FAILED`.
+Each step's failure mode must produce a clear `ingestion_jobs.status = FAILED` (a malformed/empty file, or extracted content that fails DB mapping) with a reason, not a silent partial result — except a scanned/image-only PDF (no extractable text), which is a different, expected case: `status = NEEDS_REVIEW`, not `FAILED`. The file and its `source_documents` row are still persisted (storage_path written, hash recorded) so nothing is lost; there is simply no extractable text to map or index yet. Status values in practice: `RECEIVED, EXTRACTING, MAPPING, CHUNKING, COMPLETED, NEEDS_REVIEW, FAILED`.
+
+## OCR scope (section 5I)
+
+The current pipeline is text-extraction only (PyMuPDF). There is no OCR fallback wired up. `app/ingestion/pdf_extractor.py::extract_pdf` detects a page with fewer than `MIN_TEXT_CHARS_PER_PAGE` characters of extracted text as non-text; if *every* page falls under that threshold, `PdfExtractionResult.is_text_extractable` is `False` and `app/api/upload.py` marks the upload `NEEDS_REVIEW` instead of attempting to map or index empty content. This is never silently reported as a successful, fully-indexed upload — the UI's Document Intelligence page shows `NEEDS_REVIEW` with an explanation, and the document is still listed and downloadable-by-reference for manual follow-up.
+
+## Document-scoped Q&A flow (section 5G)
+
+```text
+User question + document_id → app.api.upload::query_document
+   1. Load the source_documents row; 404 if it doesn't exist
+   2. Build AuthorizationContext from the authenticated user
+   3. _document_authorized(ctx, doc, user.id) → 403 if not authorized
+      (uploader, admin, or assigned to the document's resolved patient)
+   4. doc.status != COMPLETED → return NO_AUTHORIZED_CONTEXT, no retrieval
+   5. app.rag.pipeline.run_query(..., patient_id=doc.patient_id,
+      document_id=doc.id) — the SAME authorization + retrieval pipeline
+      chat uses, with one extra Qdrant/SQL condition: source_document_id
+      must match this document, so only this document's own chunks can
+      ever answer the question
+   6. Citation validation, audit log, response — identical to /api/rag/query
+```
+
+## Hospital Insights flow (section 6C)
+
+```text
+User question (or just loading the overview) → app.rag.insights
+   1. build_authorization_context(user) — same context as chat/documents
+   2. Role-specific SQL aggregation ONLY (app.rag.insights.build_overview):
+      ADMIN: system-wide counts; FINANCE: claim/outstanding aggregates;
+      RECEPTION: encounter counts/breakdown; DOCTOR/NURSE: counts filtered
+      to assigned_patient_ids. No cross-role widening is possible here —
+      the same ROLE_POLICY scoping as every other retrieval path applies.
+   3. (query endpoint only) Every computed metric is packaged as the
+      single citable [SOURCE_1] block
+   4. LLM narrates/explains that block — it is never asked to compute or
+      invent a total; if there are no metrics to narrate, the LLM is not
+      called at all
+   5. Audit log (action="insights_query")
+```
 
 ## Chunking strategy (Phase 3)
 
