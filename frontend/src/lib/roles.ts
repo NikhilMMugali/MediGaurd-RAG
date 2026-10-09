@@ -53,3 +53,8 @@ export const CAN_UPLOAD: Role[] = ["DOCTOR", "NURSE", "ADMIN"];
 // actually enforces it (section 10 "never duplicate security logic in the
 // frontend" — this is a visibility convenience, not an access control).
 export const CAN_VIEW_DOCUMENTS: Role[] = ["DOCTOR", "NURSE", "ADMIN"];
+
+// Hospital Insights is admin-only, server-side (app.api.insights —
+// require_roles(RoleEnum.ADMIN)) — kept in sync here only to decide whether
+// to show the nav link at all, same caveat as CAN_VIEW_DOCUMENTS above.
+export const CAN_VIEW_INSIGHTS: Role[] = ["ADMIN"];

@@ -5,7 +5,7 @@ import { useAuth } from "@/auth/AuthContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { CAN_VIEW_DOCUMENTS, ROLE_ICON } from "@/lib/roles";
+import { CAN_VIEW_DOCUMENTS, CAN_VIEW_INSIGHTS, ROLE_ICON } from "@/lib/roles";
 
 const ASSISTANT_LINKS = [
   { to: "/assistant/chat", label: "Clinical Chat", icon: MessageSquare },
@@ -33,9 +33,11 @@ export default function Sidebar() {
   if (!user) return null;
 
   const RoleIcon = ROLE_ICON[user.role];
-  const assistantLinks = ASSISTANT_LINKS.filter(
-    (link) => link.to !== "/assistant/documents" || CAN_VIEW_DOCUMENTS.includes(user.role),
-  );
+  const assistantLinks = ASSISTANT_LINKS.filter((link) => {
+    if (link.to === "/assistant/documents") return CAN_VIEW_DOCUMENTS.includes(user.role);
+    if (link.to === "/assistant/insights") return CAN_VIEW_INSIGHTS.includes(user.role);
+    return true;
+  });
 
   return (
     <aside className="flex h-screen w-64 shrink-0 flex-col justify-between border-r bg-card px-3 py-4">

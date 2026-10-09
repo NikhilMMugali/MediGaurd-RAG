@@ -1,17 +1,22 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.auth.deps import get_current_user
+from app.auth.deps import require_roles
 from app.db.session import get_db
-from app.models.user import User
+from app.models.user import RoleEnum, User
 from app.rag.insights import answer_insight_question, build_overview
 from app.schemas.insights import BreakdownResponse, InsightsOverviewResponse, InsightsQueryRequest, InsightsQueryResponse, MetricResponse
 
+# Hospital Insights is admin-only (explicit scope narrowing — it was
+# previously available to every role with a role-scoped view; now it's
+# ADMIN-only regardless of what a role's own scope would otherwise allow).
 router = APIRouter(prefix="/api/insights", tags=["insights"])
 
 
 @router.get("/overview", response_model=InsightsOverviewResponse)
-def insights_overview(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> InsightsOverviewResponse:
+def insights_overview(
+    user: User = Depends(require_roles(RoleEnum.ADMIN)), db: Session = Depends(get_db)
+) -> InsightsOverviewResponse:
     overview = build_overview(db, user)
     return InsightsOverviewResponse(
         role=overview.role,
@@ -25,7 +30,7 @@ def insights_overview(user: User = Depends(get_current_user), db: Session = Depe
 
 @router.post("/query", response_model=InsightsQueryResponse)
 def insights_query(
-    payload: InsightsQueryRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    payload: InsightsQueryRequest, user: User = Depends(require_roles(RoleEnum.ADMIN)), db: Session = Depends(get_db)
 ) -> InsightsQueryResponse:
     result = answer_insight_question(db, user, payload.question)
     return InsightsQueryResponse(
