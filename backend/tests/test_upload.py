@@ -204,3 +204,77 @@ def test_upload_of_broken_duplicate_is_repaired_not_dead_ended(client, seeded_do
 
     repaired_count = db_session.query(KnowledgeRecord).filter(KnowledgeRecord.source_document_id == broken.id).count()
     assert repaired_count == body["chunks_indexed"]
+
+
+def test_duplicate_with_chunks_but_no_patient_link_is_repaired(client, seeded_doctor, db_session):
+    """Regression for the exact second reported bug: a document that has
+    knowledge_records (so the zero-chunks repair path above wouldn't even
+    trigger) but whose patient was never identified — "no patient could be
+    identified in it" in the upload response — stays permanently
+    unretrievable by a patient-scoped role unless re-upload also repairs the
+    missing patient link, not just missing chunks."""
+    from app.models.documents import KnowledgeRecord, SourceDocument
+    from app.models.provenance import new_uuid
+    from app.models.ward import PatientAssignment
+
+    token = _login(client, seeded_doctor)
+    headers = {"Authorization": f"Bearer {token}"}
+    page_text = (
+        "Patient Name\n"
+        "KAVYA DEMO PATIENT\n"
+        "Demo Patient ID\n"
+        "DEMO-PT-2026-1042\n"
+        "Gender\n"
+        "Female\n"
+        "Hemoglobin 13.8 g/dL 12.0 - 16.0 NORMAL\n"
+    )
+    pdf_bytes = _make_pdf_bytes(page_text)
+
+    broken = SourceDocument(
+        id=new_uuid(),
+        file_name="kavya_report.pdf",
+        file_hash=__import__("hashlib").sha256(pdf_bytes).hexdigest(),
+        source_type="UPLOADED_PDF",
+        uploaded_by=seeded_doctor.id,
+        status="COMPLETED",
+        patient_id=None,  # the exact broken state: identity was never resolved
+    )
+    db_session.add(broken)
+    db_session.add(
+        KnowledgeRecord(
+            id=new_uuid(),
+            patient_id=None,
+            record_type="document",
+            source_type="UPLOADED_PDF",
+            source_document_id=broken.id,
+            source_page=1,
+            source_section="document",
+            sensitivity="clinical",
+            content="Patient: Unknown\nDocument page 1\n\n" + page_text,
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/api/documents/upload",
+        files={"file": ("kavya_report.pdf", pdf_bytes, "application/pdf")},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["document_id"] == broken.id
+    assert body["patient_id"] is not None
+
+    db_session.expire_all()
+    repaired_doc = db_session.query(SourceDocument).filter(SourceDocument.id == broken.id).first()
+    assert repaired_doc.patient_id is not None
+
+    kr = db_session.query(KnowledgeRecord).filter(KnowledgeRecord.source_document_id == broken.id).first()
+    assert kr.patient_id == repaired_doc.patient_id
+
+    assignment = (
+        db_session.query(PatientAssignment)
+        .filter(PatientAssignment.patient_id == repaired_doc.patient_id, PatientAssignment.user_id == seeded_doctor.id)
+        .first()
+    )
+    assert assignment is not None

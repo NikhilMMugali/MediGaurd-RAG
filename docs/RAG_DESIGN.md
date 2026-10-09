@@ -34,11 +34,18 @@ retrieval fix" for the full root-cause writeup):
    (`0.0 or None` → `None`) regardless of what it was actually set to. No
    relevance floor was ever really applied by any caller. Fixed: the
    default is now `0.35` (cosine, embeddings are normalized) and the
-   falsy-coalescing is gone — `None` is the real "no filter" value now. The
-   known-patient SQL fast path applies the same floor to its own
-   dot-product ranking (skipped for recency queries, where the score is
-   dominated by recency rather than topical similarity — see
-   `_retrieve_for_known_patient`).
+   falsy-coalescing is gone — `None` is the real "no filter" value now.
+   This floor applies on the unscoped Qdrant-search branch (no patient
+   resolved) — the actual boundary that stopped an unrelated patient's
+   record from being shown. It does **not** apply on the known-patient SQL
+   fast path (reverted 2026-10-10, docs/DECISIONS.md "PDF retrieval fix,
+   part 2") — every candidate there is already scoped to the right
+   `patient_id`/`record_type`/`allowed_sensitivity` by SQL before any
+   ranking happens, so a low score there is a recall problem, not a
+   security one; applying the same floor there only discarded correct
+   answers whenever a coarse whole-page narrative chunk's broad content
+   diluted its similarity to a short, specific question — reproduced live
+   against a real uploaded document (`_retrieve_for_known_patient`).
 
 ## Pipeline (semantic route)
 

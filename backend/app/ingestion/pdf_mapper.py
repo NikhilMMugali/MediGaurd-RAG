@@ -9,7 +9,7 @@ call — fast, free, and fully traceable for a hackathon demo, matching the
 sample document format in docs/DATA_FLOW.md. A smarter extractor can replace
 `extract_patient_document_data` later without touching the DB-mapping half.
 
-Two real-world gaps were found and fixed here (progress/DECISIONS.md "PDF
+Three real-world gaps were found and fixed here (progress/DECISIONS.md "PDF
 retrieval fix"): (1) a document whose content doesn't match any of the
 structured Label:Value categories below — e.g. a lab report's test-result
 tables — previously produced zero knowledge_records and was therefore
@@ -20,7 +20,11 @@ value when two fields share one physical line ("Name : X Reg. No. : Y",
 common in real lab-report headers) because it captures everything from the
 first colon to end-of-line; `_extract_identity_fallback` recovers a clean
 name/registration-id/gender from such lines via field-boundary-aware regexes
-instead."""
+instead. (3) a third, common form-style layout puts a bare label on its own
+line with no colon at all and the value on the line immediately after it
+("Patient Name" / "KAVYA DEMO PATIENT") — neither (1) nor (2) have any colon
+to anchor on, so neither ever matches; `_extract_label_next_line_fields`
+handles this as a third fallback tier."""
 import re
 
 from sqlalchemy.orm import Session
@@ -58,6 +62,51 @@ _FIELD_BOUNDARY = r"(?:\n|Reg\.?\s*No\.?|Age\b|Gender\b|Ref\.?\s*By\b|Location\b
 _NAME_FIELD_RE = re.compile(rf"\bName\s*:\s*(.+?)(?=\s*{_FIELD_BOUNDARY})", re.IGNORECASE)
 _REGNO_FIELD_RE = re.compile(r"\b(?:Reg\.?\s*No\.?|Registration\s*No\.?|MRN)\s*:?\s*([A-Za-z0-9\-]{4,})\b", re.IGNORECASE)
 _GENDER_FIELD_RE = re.compile(r"\bGender\s*:?\s*(Male|Female|Other)\b", re.IGNORECASE)
+
+# Bare label on its own line, value on the next line — a common form/table
+# export layout with no colon anywhere to anchor the two regexes above on.
+# Matched by normalizing each line (strip, lowercase, drop a trailing colon)
+# and checking membership in these label sets, generic to the layout and
+# never keyed to any specific patient's name or id.
+_NEXT_LINE_NAME_LABELS = {"patient name", "name", "full name"}
+_NEXT_LINE_ID_LABELS = {
+    "patient id", "patient_id", "demo patient id", "mrn", "reg no", "reg. no",
+    "registration no", "registration number", "patient registration number",
+}
+_NEXT_LINE_GENDER_LABELS = {"gender", "sex"}
+
+
+def _extract_label_next_line_fields(pages: list[ExtractedPage]) -> tuple[str | None, str | None, str | None]:
+    """Third fallback tier: some PDF exports (often form/table layouts where
+    PyMuPDF's plain-text mode linearizes a two-column form into sequential
+    lines) render a field label alone on one line with the value on the very
+    next line, with no colon anywhere to anchor a regex on — e.g.:
+
+        Patient Name
+        KAVYA DEMO PATIENT
+        Demo Patient ID
+        DEMO-PT-2026-1042
+
+    Neither `_LABEL_LINE` (needs a colon) nor `_extract_identity_fallback`
+    (also colon-anchored) can ever match this layout. Returns
+    (name, external_patient_id, gender), any of which may be None."""
+    name = external_id = gender = None
+    for page in pages:
+        lines = [ln.strip() for ln in page.text.splitlines()]
+        for i, line in enumerate(lines[:-1]):
+            key = line.rstrip(":").strip().lower()
+            value = lines[i + 1].strip()
+            if not value:
+                continue
+            if name is None and key in _NEXT_LINE_NAME_LABELS:
+                name = _clean_identity_value(value)
+            elif external_id is None and key in _NEXT_LINE_ID_LABELS:
+                external_id = _clean_identity_value(value)
+            elif gender is None and key in _NEXT_LINE_GENDER_LABELS and value.capitalize() in ("Male", "Female", "Other"):
+                gender = value.capitalize()
+        if name:
+            break
+    return name, external_id, gender
 
 # Page content kept as a narrative knowledge record is capped so one chunk
 # stays within a sensible embedding length; real lab-report pages are far
@@ -146,6 +195,14 @@ def extract_patient_document_data(extraction: PdfExtractionResult) -> PatientDoc
         clean_name = fallback_name
         if fallback_regno and not patient_id:
             patient_id = fallback_regno
+    if not clean_name:
+        # Neither colon-anchored strategy matched at all — try the
+        # label-on-its-own-line, value-on-the-next-line layout.
+        fallback_name, fallback_id, fallback_gender = _extract_label_next_line_fields(extraction.pages)
+        clean_name = fallback_name
+        gender = gender or fallback_gender
+        if fallback_id and not patient_id:
+            patient_id = fallback_id
 
     if patient_id or clean_name:
         first, _, last = (clean_name or "").partition(" ")

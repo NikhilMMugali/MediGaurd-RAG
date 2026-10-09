@@ -11,7 +11,13 @@ from app.authorization.context import AuthorizationContext, build_authorization_
 from app.config import get_settings
 from app.db.session import get_db
 from app.ingestion.pdf_extractor import PdfExtractionError, extract_pdf
-from app.ingestion.pdf_mapper import _add_knowledge_record, extract_patient_document_data, map_to_database, narrative_sections_for_document
+from app.ingestion.pdf_mapper import (
+    _add_knowledge_record,
+    extract_patient_document_data,
+    find_or_create_patient,
+    map_to_database,
+    narrative_sections_for_document,
+)
 from app.models.documents import IngestionJob, KnowledgeRecord, SourceDocument
 from app.models.hospital import Patient
 from app.models.provenance import new_uuid
@@ -76,7 +82,13 @@ def _handle_duplicate_upload(db: Session, user: User, existing: SourceDocument, 
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this document.")
 
     existing_kr_count = db.query(KnowledgeRecord).filter(KnowledgeRecord.source_document_id == existing.id).count()
-    if existing_kr_count > 0:
+    # A document can have chunks AND still need repair — zero chunks is not
+    # the only broken state. A document whose patient was never identified
+    # (patient_id is None) is just as unretrievable for a patient-scoped
+    # role, regardless of how many chunks were indexed under that missing
+    # association, so this is checked independently of existing_kr_count.
+    needs_patient_link = existing.patient_id is None
+    if existing_kr_count > 0 and not needs_patient_link:
         return UploadResponse(
             document_id=existing.id,
             file_name=existing.file_name,
@@ -102,50 +114,89 @@ def _handle_duplicate_upload(db: Session, user: User, existing: SourceDocument, 
             chunks_indexed=0,
         )
 
-    # Broken/incomplete duplicate: repair in place. Only the narrative
-    # knowledge records are (re)created here, never the structured rows —
-    # map_to_database's per-row inserts are not idempotent, so re-running it
-    # against a document that already has some structured rows would
-    # duplicate them. Narrative records are additive-safe since this branch
-    # is only reached when none exist yet for this document at all.
-    narrative_sections = narrative_sections_for_document(result)
-    display_ref = _patient_display_id(db, existing.patient_id) or "Unknown"
-    knowledge_record_ids = [
-        _add_knowledge_record(
-            db,
-            patient_id=existing.patient_id,
-            record_type="document",
-            record_id=None,
-            sensitivity="clinical",
-            content=f"Patient: {display_ref}\nDocument page {section.source_page}\n\n{section.content}",
-            source_document_id=existing.id,
-            source_page=section.source_page,
-            source_section="document",
-        )
-        for section in narrative_sections
-    ]
-    db.commit()
+    # Broken/incomplete duplicate: repair in place. Only identity resolution
+    # and narrative knowledge records are (re)created here, never the
+    # structured rows — map_to_database's per-row inserts are not
+    # idempotent, so re-running it against a document that already has some
+    # structured rows would duplicate them.
+    patient_linked_now = False
+    if needs_patient_link:
+        normalized = extract_patient_document_data(result)
+        patient, patient_created = find_or_create_patient(db, normalized.patient, existing.id)
+        if patient is not None:
+            existing.patient_id = patient.id
+            # Any chunk already indexed under the missing association gets
+            # the correct patient_id too — it's re-indexed below so its
+            # Qdrant payload (which bakes patient_id in at upsert time)
+            # stops being stale as well.
+            db.query(KnowledgeRecord).filter(
+                KnowledgeRecord.source_document_id == existing.id, KnowledgeRecord.patient_id.is_(None)
+            ).update({"patient_id": patient.id})
+            if patient_created:
+                db.add(PatientAssignment(id=new_uuid(), patient_id=patient.id, user_id=user.id, assignment_type="attending"))
+            db.commit()
+            patient_linked_now = True
 
+    display_ref = _patient_display_id(db, existing.patient_id) or "Unknown"
+
+    new_knowledge_record_ids: list[str] = []
+    if existing_kr_count == 0:
+        narrative_sections = narrative_sections_for_document(result)
+        new_knowledge_record_ids = [
+            _add_knowledge_record(
+                db,
+                patient_id=existing.patient_id,
+                record_type="document",
+                record_id=None,
+                sensitivity="clinical",
+                content=f"Patient: {display_ref}\nDocument page {section.source_page}\n\n{section.content}",
+                source_document_id=existing.id,
+                source_page=section.source_page,
+                source_section="document",
+            )
+            for section in narrative_sections
+        ]
+        db.commit()
+
+    # Re-index: the brand-new records above, plus every pre-existing record
+    # for this document if its patient association just changed (Qdrant
+    # upsert is idempotent on the knowledge_record's own stable id, so this
+    # simply overwrites the stale payload with the corrected one).
+    record_ids_to_index = set(new_knowledge_record_ids)
+    if patient_linked_now:
+        record_ids_to_index.update(
+            r.id for r in db.query(KnowledgeRecord.id).filter(KnowledgeRecord.source_document_id == existing.id).all()
+        )
     chunks_indexed = 0
-    if knowledge_record_ids:
-        records = db.query(KnowledgeRecord).filter(KnowledgeRecord.id.in_(knowledge_record_ids)).all()
+    if record_ids_to_index:
+        records = db.query(KnowledgeRecord).filter(KnowledgeRecord.id.in_(record_ids_to_index)).all()
         chunks_indexed = index_records(records, get_embedding_provider(), get_vector_store())
 
     existing.status = "COMPLETED"
     db.commit()
+
+    message_parts = []
+    if patient_linked_now:
+        message_parts.append(f"linked it to patient {display_ref}")
+    if new_knowledge_record_ids:
+        message_parts.append(f"indexed {len(new_knowledge_record_ids)} new knowledge chunk(s)")
+    elif patient_linked_now:
+        message_parts.append("re-indexed its existing chunks with the corrected patient association")
+    message = (
+        "This document was already uploaded; " + " and ".join(message_parts) + "."
+        if message_parts
+        else "This document was already uploaded and is fully indexed."
+    )
 
     return UploadResponse(
         document_id=existing.id,
         file_name=existing.file_name,
         status="COMPLETED",
         page_count=result.page_count,
-        message=(
-            f"This document was already uploaded; it was missing indexed content, so {chunks_indexed} "
-            "knowledge chunk(s) have now been indexed and it is ready to query."
-        ),
+        message=message,
         patient_id=display_ref if existing.patient_id else None,
         records_created=0,
-        chunks_indexed=chunks_indexed,
+        chunks_indexed=existing_kr_count + len(new_knowledge_record_ids),
     )
 
 

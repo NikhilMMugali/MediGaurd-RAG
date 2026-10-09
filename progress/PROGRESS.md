@@ -163,5 +163,20 @@ Reproduced a real reported bug (uploaded lab report → "tell me about <patient>
 ### Known limitation
 A patient record created before this fix keeps whatever garbled name the old parser stored — no data-migration script re-runs identity extraction against already-ingested patients. Re-uploading an old document only repairs its indexing state, not a patient row's already-stored name fields.
 
+## 2026-10-10 — PDF retrieval fix, part 2 (real user upload, two more gaps + a self-caught regression)
+
+A real demo PDF uploaded live through the app ("Kavya Demo Patient", 3 pages) reproduced the same class of bug via two causes part 1 didn't cover, full writeup in `progress/DECISIONS.md`:
+
+- [x] Third identity-extraction fallback tier — handles a "bare label on its own line, value on the next line" layout (`"Patient Name"` / `"KAVYA DEMO PATIENT"`) that neither of part 1's two colon-anchored strategies could ever match
+- [x] Duplicate-upload repair now also triggers on "chunks exist but `patient_id` is `None`" (not just "zero chunks") — backfills `patient_id` onto existing knowledge records AND re-indexes them into Qdrant, since the stale `patient_id` was also baked into the already-upserted payload
+- [x] Self-caught during verification: the relevance floor from part 1 had also been applied to the known-patient SQL fast path, where it isn't a security boundary at all (every candidate there is already scoped to the right patient+type by SQL) — it was discarding correct answers whenever a coarse whole-page chunk's broad content diluted its similarity to a specific question. Removed from that path; kept on the actual cross-patient-leakage path where it belongs.
+
+### Verification — against the real document, not a reconstruction
+- [x] The real file was still on disk at its stored path; re-uploaded it through the live API to trigger the actual repair path: `"linked it to patient P105 and re-indexed its existing chunks with the corrected patient association"`
+- [x] "Tell me about Kavya Demo Patient." → `ANSWERED`, citations all `patient_id: P105`, zero unrelated sources (previously P003/P004 procedure records)
+- [x] "What is the WBC count...", "Which value is flagged LOW...", "What is the TSH result...", "What is the Vitamin B12 result?" — all answered correctly with the real values/units/pages from the document
+- [x] Unassigned nurse asking the identical question — still correctly `DENIED`
+- [x] 3 new/updated backend tests, **52/52 passing**
+
 ## Last Updated
-2026-10-09
+2026-10-10

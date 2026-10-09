@@ -324,17 +324,19 @@ def _retrieve_for_known_patient(
         scored.append((score, record))
 
     scored.sort(key=lambda pair: pair[0], reverse=True)
-    if not intent.is_recency:
-        # A recency query ("recent observations") is a structural request —
-        # the score here is dominated by recency_bonus, not topical
-        # similarity to the question text, so a relevance floor doesn't
-        # apply. For a plain content question, a candidate set that's all
-        # weakly-scored means none of this patient's own authorized records
-        # actually address the question — show "not enough information"
-        # rather than the top-k regardless of how weak (section 8D "do not
-        # attach the first five results simply because retrieval returned
-        # them").
-        scored = [pair for pair in scored if pair[0] >= settings.rag_score_threshold]
+    # No relevance floor here, deliberately (reverted 2026-10-10 — see
+    # progress/DECISIONS.md "PDF retrieval fix, part 2"). Every candidate in
+    # `candidates` is already scoped to the right patient_id AND the right
+    # record_type(s) AND the caller's allowed_sensitivity by the SQL query
+    # above — that's the actual authorization/correctness boundary on this
+    # path, not the embedding score. A floor tuned for the *unscoped*
+    # cross-patient search below (where it correctly stops an unrelated
+    # patient's record from being shown) was also being applied here, where
+    # it instead just discarded this patient's own correct, authorized
+    # answer whenever a coarse whole-page narrative chunk's topically-broad
+    # content diluted its cosine similarity to a short, specific question
+    # below the floor — turning a real, retrievable answer into a false
+    # "couldn't find enough information."
     top = [record for _, record in scored[: settings.rag_context_k]]
     return [_record_to_source(r) for r in top], debug
 
