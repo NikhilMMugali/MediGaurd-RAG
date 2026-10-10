@@ -77,7 +77,14 @@ export default function PdfViewerPanel({ citation, onClose }: PdfViewerPanelProp
   }, [documentId]);
 
   React.useEffect(() => {
-    if (citation?.page) setPageNumber(citation.page);
+    // A structured-answer citation (app/rag/pipeline.py's
+    // _structured_sources_to_citations) can carry a real document_id with
+    // page=None. Without this unconditional set, clicking that citation
+    // right after a paged one leaves pageNumber at the *previous*
+    // document's page — a stale page shown for an unrelated document, not
+    // just "defaults to page 1." Falling back to 1 is the correct "no
+    // specific page cited" default.
+    setPageNumber(citation?.page ?? 1);
   }, [citation?.page, documentId]);
 
   const textRenderer = React.useMemo(() => buildTextRenderer(citation?.evidence_text ?? null), [citation?.evidence_text]);

@@ -39,6 +39,18 @@ export default function AssistantPanel({ patientId, onClearPatient, onSelectPati
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
+  // Without this, switching from Patient A to Patient B (or back to no
+  // patient) left Patient A's messages and citations on screen under the
+  // new patient badge — each answer is still correctly re-scoped by the
+  // backend, but the visible transcript made it look like the old
+  // conversation was still about the newly selected patient. A patient
+  // switch starts a fresh thread rather than silently mixing two
+  // patients' Q&A in one scrollback.
+  React.useEffect(() => {
+    setMessages([]);
+    setActiveCitation(null);
+  }, [patientId]);
+
   if (!user) return null;
 
   async function send(question: string) {

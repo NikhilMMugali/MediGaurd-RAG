@@ -16,7 +16,7 @@ retrieval-authorization code path in the app, same as before this
 hybrid-routing change.
 """
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from qdrant_client.models import Filter
@@ -478,26 +478,43 @@ def run_query(
                 {"history": intent.history, "categories": intent.observation_categories},
             )
 
-        if structured is None:
-            _write_audit_log(db, user, question, "NO_AUTHORIZED_CONTEXT", [], "no structured data available")
+        # structured is None means the relevant SQL table has zero rows for
+        # this patient — true for a Synthea-native patient with genuinely no
+        # data of that type, but also true for a patient whose only record
+        # of it lives in an uploaded PDF's narrative text (never imported
+        # into a structured table — see app/ingestion/pdf_mapper.py's
+        # module docstring on the "document" record_type fallback).
+        # Declaring failure here would silently ignore real evidence the
+        # semantic path below could still find; falling through costs one
+        # extra retrieval call in the genuinely-empty case and answers
+        # correctly in the PDF-only case (docs/RAG_DESIGN.md "database when
+        # exact, semantic when it requires both"). answer_summary (the
+        # other branch above) never returns None, so this fallthrough only
+        # ever applies to the single-intent handlers.
+        if structured is not None:
+            citations = _structured_sources_to_citations(db, structured.sources, display_id)
+            retrieved_ids = [s.record_id for s in structured.sources]
+            _write_audit_log(db, user, question, "ANSWERED", retrieved_ids, None)
             return RagResult(
-                answer="I couldn't find enough authorized information to answer that question.",
-                status="NO_AUTHORIZED_CONTEXT",
-                citations=[],
-                retrieved_count=0,
+                answer=structured.markdown,
+                status="ANSWERED",
+                citations=citations,
+                retrieved_count=len(structured.sources),
                 debug=authorized.debug,
             )
 
-        citations = _structured_sources_to_citations(db, structured.sources, display_id)
-        retrieved_ids = [s.record_id for s in structured.sources]
-        _write_audit_log(db, user, question, "ANSWERED", retrieved_ids, None)
-        return RagResult(
-            answer=structured.markdown,
-            status="ANSWERED",
-            citations=citations,
-            retrieved_count=len(structured.sources),
-            debug=authorized.debug,
-        )
+        # The semantic fallback above only helps if it can actually see the
+        # generic "document" narrative chunks (an uploaded PDF whose
+        # content was never parsed into a structured row) — intent.record_
+        # types narrowed effective_record_types to the single classified
+        # type (e.g. ["observation"]), which would otherwise filter those
+        # chunks out too and reproduce the exact same "nothing found" miss.
+        # "document" is already inside ctx.allowed_record_types for every
+        # clinical role, so adding it here only broadens *which* already-
+        # authorized bucket this one fallback searches, never who is
+        # authorized to see what.
+        if "document" in authorized.ctx.allowed_record_types and "document" not in authorized.effective_record_types:
+            authorized = replace(authorized, effective_record_types=authorized.effective_record_types + ["document"])
 
     outcome = _semantic_retrieve(db, authorized, question, document_id)
     if outcome.status != "OK":

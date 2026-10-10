@@ -15,6 +15,14 @@
 - [x] Phase 9 (DB/security) — bounded spot-check only (SQLi, CORS, secret-key handling, patient-FK indexing) — no issues found; not a full audit
 - [ ] Phase 1 (full written repo audit), Phase 2 (systematic dedup/dead-code sweep beyond the one spot-check above), Phase 3 (no destructive dataset work needed), Phase 6 (RAG quality beyond prior sessions' fixes), Phase 7 (PDF robustness beyond prior sessions' fixes), Phase 8 (frontend/UI-UX polish), Phase 9 (performance profiling/load testing), Phase 10 (broader eval suite — PDF ingestion/retrieval/citation/authorization/dataset-integrity beyond query classification) — not attempted this pass; the 14-phase prompt's full scope was treated as multiple future iterations, not one, per the final report's explicit scoping note
 
+## 2026-10-10 verification pass — 3 real bugs found and fixed against the live app
+- [x] Structured-intent miss (e.g. "what about his vitamin D result?" for a PDF-only patient) silently returned NO_AUTHORIZED_CONTEXT instead of falling back to semantic retrieval over the document's narrative chunks — fixed in `app/rag/pipeline.py::run_query`; see progress/DECISIONS.md "Verification pass"
+- [x] `PdfViewerPanel.tsx` could show a stale page number from the previously-opened document when a structured-answer citation (page=None) was clicked next — fixed
+- [x] `AssistantPanel.tsx` (Clinical Chat) didn't clear its chat transcript/active citation when switching patients, unlike `DocumentQuestionPanel.tsx`'s equivalent — fixed to match the existing correct pattern
+- [x] Zero test coverage on `GET /api/documents/{document_id}/file` (the citation viewer's file-serving endpoint) despite it being the exact "guessing a document ID" security path the PDF-viewer feature's acceptance criteria call out — 6 tests added, including a path-traversal attempt
+- [ ] No server-side multi-turn conversation memory — a follow-up relying on pronoun resolution against the previous turn (e.g. "Which page shows that?") doesn't resolve correctly; documented as a known architectural limitation, not fixed this pass (would be new feature work)
+- [ ] Manual browser click-through still required — no browser automation tool is available in this environment (reconfirmed via ToolSearch); see the session's final report for the specific checklist
+
 ## Frontend — remaining
 - [ ] Admin retrieval-debug panel UI (backend already returns the `debug` block to ADMIN on `/api/rag/query` — just needs an expandable "Retrieval Details" section)
 - [x] Live ingestion status display — `GET /api/documents/{id}/status` + `DocumentProcessingStatus.tsx` on the new Document Intelligence page reads the persisted `ingestion_jobs` state rather than only the upload response; the original small `UploadDialog` on the Patients page still just shows the final result (not revisited — Document Intelligence is the primary upload surface now)

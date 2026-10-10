@@ -277,6 +277,73 @@ def test_known_patient_fast_path_has_no_relevance_floor(db_session, seeded_docto
     assert result.retrieved_count == 1
 
 
+def test_observation_intent_falls_back_to_document_narrative_when_no_structured_rows(db_session, seeded_doctor, tmp_path, monkeypatch):
+    """A real, live regression found this session (not a hypothetical):
+    the 2026-10-10 classifier change that taught classify_query() to
+    recognize "vitamin D"/"blood report" phrasing as the observation
+    intent (record_types=["observation"], route="structured") broke "What
+    about his vitamin D result?" for the exact real demo patient
+    (Kavya/P105) whose lab value lives only in an uploaded PDF's narrative
+    text — never imported into the structured Observation table. The
+    structured answer_recent_observations() handler correctly found zero
+    Observation rows and returned None, and run_query used to treat that
+    as an immediate NO_AUTHORIZED_CONTEXT — silently ignoring the real
+    evidence sitting in that patient's own record_type="document"
+    knowledge record, which the semantic path could have answered from.
+
+    Fixed in app/rag/pipeline.py::run_query: a None structured result now
+    falls through to the semantic path instead of failing outright, with
+    effective_record_types widened to also include "document" (already
+    inside every clinical role's allowed_record_types) so the narrative
+    chunk isn't filtered out by the same narrow ["observation"] scoping
+    that correctly caused the structured miss in the first place."""
+    from app.models.documents import KnowledgeRecord
+    from app.rag.pipeline import run_query
+
+    client = QdrantClient(path=str(tmp_path / "qdrant"))
+    store = VectorStore(client, "test_collection")
+    store.ensure_collection(8)
+
+    patient = Patient(id=new_uuid(), first="Kavya", last="Demo Patient", display_id="P301")
+    db_session.add(patient)
+    db_session.add(PatientAssignment(id=new_uuid(), patient_id=patient.id, user_id=seeded_doctor.id, assignment_type="attending"))
+    record = KnowledgeRecord(
+        id=new_uuid(),
+        patient_id=patient.id,
+        record_type="document",
+        source_type="UPLOADED_PDF",
+        source_page=3,
+        source_section="document",
+        sensitivity="clinical",
+        content="25-OH Vitamin D: 18 ng/mL (LOW), reference interval 30-100 ng/mL.",
+    )
+    db_session.add(record)
+    db_session.commit()
+
+    query_vector = _unit_vector(8, hot_index=0, secondary=0.0)
+    record_vector = _unit_vector(8, hot_index=0, secondary=0.1)  # high cosine — a genuine topical match
+    store.upsert([PointStruct(id=record.id, vector=record_vector, payload={})])
+
+    class _FixedVectorEmbedder:
+        dimension = 8
+
+        def embed_text(self, text: str) -> list[float]:
+            return query_vector
+
+    class _StubLLM:
+        def generate(self, context_text: str, question: str) -> str:
+            return "stub answer [SOURCE_1]"
+
+    monkeypatch.setattr("app.rag.pipeline.get_embedding_provider", lambda: _FixedVectorEmbedder())
+    monkeypatch.setattr("app.rag.pipeline.get_vector_store", lambda: store)
+    monkeypatch.setattr("app.rag.pipeline.get_llm_provider", lambda sources: _StubLLM())
+
+    result = run_query(db_session, seeded_doctor, "What about his vitamin D result?", patient_id=patient.id)
+
+    assert result.status == "ANSWERED"
+    assert result.retrieved_count == 1
+
+
 def _broken_document(db_session, uploaded_by: str) -> SourceDocument:
     doc = SourceDocument(
         id=new_uuid(),
