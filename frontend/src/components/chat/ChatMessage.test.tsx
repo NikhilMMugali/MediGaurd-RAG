@@ -90,4 +90,18 @@ describe("ChatMessage citation handling", () => {
     // not also render as a clickable PDF link.
     expect(screen.getAllByRole("button")).toHaveLength(1);
   });
+
+  it("a clarification renders a 'Select a patient' notice, not the 'No authorized information' heading", () => {
+    render(
+      <ChatMessage
+        role="assistant"
+        text="This question refers to a specific patient, but no patient is selected."
+        status="NEEDS_CLARIFICATION"
+        citations={[]}
+      />
+    );
+    expect(screen.getByText("Select a patient")).toBeInTheDocument();
+    expect(screen.queryByText(/no authorized information found/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/no patient is selected/i)).toBeInTheDocument();
+  });
 });

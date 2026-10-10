@@ -26,7 +26,7 @@ export interface Citation {
   highlight_text: string | null;
 }
 
-export type RagStatus = "ANSWERED" | "DENIED" | "NO_AUTHORIZED_CONTEXT";
+export type RagStatus = "ANSWERED" | "DENIED" | "NO_AUTHORIZED_CONTEXT" | "NEEDS_CLARIFICATION";
 
 export interface RagQueryResponse {
   answer: string;

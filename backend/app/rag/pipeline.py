@@ -450,6 +450,20 @@ def _structured_sources_to_citations(db: Session, sources: list, display_id: str
     ]
 
 
+# A question that points at "the" patient without naming one ("What conditions
+# does this patient have?", "what are his meds"). With no patient selected there
+# is nothing for it to refer to, and searching every authorized patient anyway
+# returned a confident-looking mix of different patients' records.
+_UNRESOLVED_PATIENT_REFERENCE_RE = re.compile(
+    r"\b(this|that|the|current|selected)\s+patient\b|\b(he|she|him|his|her|hers|their|theirs)\b", re.IGNORECASE
+)
+
+PATIENT_CONTEXT_NEEDED_MESSAGE = (
+    "This question refers to a specific patient, but no patient is selected. "
+    "Open a patient from the Patients page (\"Open in Assistant\"), or include a patient ID such as P001 in your question."
+)
+
+
 def run_query(
     db: Session, user: User, question: str, patient_id: str | None = None, document_id: str | None = None
 ) -> RagResult:
@@ -460,6 +474,21 @@ def run_query(
         return RagResult(answer=authorized.denial_answer or "", status=authorized.status, citations=[], retrieved_count=0, debug=authorized.debug)
 
     intent = authorized.intent
+
+    if (
+        document_id is None
+        and not authorized.resolved_patient
+        and intent.route in ("structured", "summary")
+        and _UNRESOLVED_PATIENT_REFERENCE_RE.search(question)
+    ):
+        _write_audit_log(db, user, question, "NEEDS_CLARIFICATION", [], "patient context required")
+        return RagResult(
+            answer=PATIENT_CONTEXT_NEEDED_MESSAGE,
+            status="NEEDS_CLARIFICATION",
+            citations=[],
+            retrieved_count=0,
+            debug=authorized.debug,
+        )
 
     # Document Intelligence Q&A (app.api.upload::query_document) always
     # passes document_id — a document-scoped question is answered from that

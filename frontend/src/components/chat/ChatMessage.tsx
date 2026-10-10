@@ -77,6 +77,7 @@ export default function ChatMessage({ role, text, status, citations, onCitationC
 
   const isRestricted = status === "DENIED";
   const isEmpty = status === "NO_AUTHORIZED_CONTEXT";
+  const needsClarification = status === "NEEDS_CLARIFICATION";
   const grouped = citations && citations.length > 0 ? groupCitations(citations) : [];
 
   return (
@@ -85,13 +86,14 @@ export default function ChatMessage({ role, text, status, citations, onCitationC
         className={
           isRestricted
             ? "rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5 text-sm"
-            : isEmpty
+            : isEmpty || needsClarification
               ? "rounded-lg border bg-muted/50 px-3.5 py-2.5 text-sm text-muted-foreground"
               : "rounded-lg border bg-card px-3.5 py-2.5 text-sm"
         }
       >
         {isRestricted && <p className="mb-1 text-xs font-semibold uppercase text-destructive">Access restricted</p>}
         {isEmpty && <p className="mb-1 text-xs font-semibold uppercase text-muted-foreground">No authorized information found</p>}
+        {needsClarification && <p className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Select a patient</p>}
         <div className="prose-chat">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
         </div>

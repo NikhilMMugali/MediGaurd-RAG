@@ -209,3 +209,43 @@ def test_pdf_citation_carries_highlight_text_but_database_citation_does_not(db_s
     db_result = run_query(db_session, seeded_doctor, "What conditions does this patient have?", patient_id=patient.id)
     assert db_result.citations[0].document_id is None
     assert db_result.citations[0].highlight_text is None
+
+
+def test_patient_reference_with_no_patient_selected_asks_for_one_instead_of_mixing_patients(
+    db_session, seeded_doctor, patched_rag_dependencies
+):
+    """Regression for a real screenshot: "What conditions does this patient
+    have?" with no patient selected searched every assigned patient and
+    answered with condition records from four different patients. 'This
+    patient' has no referent without a selection — ask, don't guess."""
+    from app.models.hospital import Condition, Patient
+    from app.rag.pipeline import run_query
+
+    for display in ("P501", "P502"):
+        patient = Patient(id=new_uuid(), first="A", last=display, display_id=display)
+        db_session.add(patient)
+        db_session.add(Condition(id=new_uuid(), patient=patient.id, description=f"Condition of {display}"))
+        db_session.add(PatientAssignment(id=new_uuid(), patient_id=patient.id, user_id=seeded_doctor.id, assignment_type="attending"))
+    db_session.commit()
+
+    for question in ("What conditions does this patient have?", "what are his meds", "Tell me about the patient"):
+        result = run_query(db_session, seeded_doctor, question)
+        assert result.status == "NEEDS_CLARIFICATION", question
+        assert result.citations == []
+        assert "no patient is selected" in result.answer
+    assert "text" not in patched_rag_dependencies  # the LLM was never called
+
+
+def test_patient_reference_is_answered_normally_once_a_patient_is_selected(db_session, seeded_doctor, patched_rag_dependencies):
+    from app.models.hospital import Condition, Patient
+    from app.rag.pipeline import run_query
+
+    patient = Patient(id=new_uuid(), first="A", last="B", display_id="P503")
+    db_session.add(patient)
+    db_session.add(Condition(id=new_uuid(), patient=patient.id, description="Essential hypertension (disorder)"))
+    db_session.add(PatientAssignment(id=new_uuid(), patient_id=patient.id, user_id=seeded_doctor.id, assignment_type="attending"))
+    db_session.commit()
+
+    result = run_query(db_session, seeded_doctor, "What conditions does this patient have?", patient_id=patient.id)
+    assert result.status == "ANSWERED"
+    assert {c.patient_id for c in result.citations} == {"P503"}

@@ -1,5 +1,19 @@
 import logging
 
+# Trust the operating system's certificate store (macOS Keychain, Windows
+# store) the way a browser does, instead of only Python's bundled certifi
+# list. A VPN, antivirus, or corporate proxy that re-signs HTTPS traffic
+# installs its root CA in the OS store; without this, outbound calls (the
+# Groq LLM call) fail with CERTIFICATE_VERIFY_FAILED while the browser works.
+# Verification stays fully on: self-signed, expired, and untrusted-root
+# certificates are still rejected. Must run before any httpx client is built.
+try:
+    import truststore
+
+    truststore.inject_into_ssl()
+except ImportError:  # optional: falls back to certifi, never blocks startup
+    pass
+
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
