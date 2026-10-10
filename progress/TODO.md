@@ -23,6 +23,15 @@
 - [ ] No server-side multi-turn conversation memory — a follow-up relying on pronoun resolution against the previous turn (e.g. "Which page shows that?") doesn't resolve correctly; documented as a known architectural limitation, not fixed this pass (would be new feature work)
 - [ ] Manual browser click-through still required — no browser automation tool is available in this environment (reconfirmed via ToolSearch); see the session's final report for the specific checklist
 
+## 2026-10-10 citation/PDF-link deep-dive — traced the whole pipeline, added the first frontend tests
+- [x] Traced the full citation-to-PDF flow end to end (backend citation construction → ChatMessage click gating → AssistantPanel state → PdfViewerPanel fetch/lifecycle → file endpoint) — no further core citation-correctness bugs found; the click-gating on `document_id`, the Synthea-native-rows-never-have-a-document_id invariant, and the fetch-cancellation guard were all already correct, now locked in by tests
+- [x] `PdfViewerPanel.tsx` had no `onLoadError` — added, wired into the existing error state (react-pdf's own default already prevented a true infinite spinner, but this gives a consistent, styled error)
+- [x] `GET /api/documents/{id}/file` sent `Content-Disposition: attachment` (Starlette's default) instead of `inline` — fixed; verified live against the real demo PDF
+- [x] Added the repository's first-ever frontend test suite (Vitest + React Testing Library, `frontend/vitest.config.ts`) — 10 new tests across `ChatMessage.test.tsx` and `PdfViewerPanel.test.tsx` covering citation click handling, stale-page prevention, document-switch cleanup, load-failure error state, and the slow-stale-fetch race condition
+- [x] Caught and fixed a real regression introduced by this pass's own first attempt at the Vitest setup: importing `defineConfig` from `"vitest/config"` inside `vite.config.ts` broke `tsc -b` (the production build) with a cross-package Vite-Plugin-type mismatch — caught by rerunning the build immediately, fixed by moving the test config into its own `vitest.config.ts` outside every tsconfig's `include`
+- [x] 3 new backend citation-integrity tests (`test_rag_pipeline.py`, `test_documents.py`) — structured citations have `document_id=None`, semantic citations preserve `document_id`/`page`/`evidence_text`/`patient_id` unchanged, and two real documents' bytes are never cross-served
+- [x] Backend 106/106, frontend build + lint + 10/10 vitest all passing — all reverified after the above regression was fixed, not assumed
+
 ## Frontend — remaining
 - [ ] Admin retrieval-debug panel UI (backend already returns the `debug` block to ADMIN on `/api/rag/query` — just needs an expandable "Retrieval Details" section)
 - [x] Live ingestion status display — `GET /api/documents/{id}/status` + `DocumentProcessingStatus.tsx` on the new Document Intelligence page reads the persisted `ingestion_jobs` state rather than only the upload response; the original small `UploadDialog` on the Patients page still just shows the final result (not revisited — Document Intelligence is the primary upload surface now)

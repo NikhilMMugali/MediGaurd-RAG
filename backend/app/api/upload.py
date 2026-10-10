@@ -473,7 +473,12 @@ def get_document_file(
     if upload_dir not in full_path.parents or not full_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stored file is missing.")
 
-    return FileResponse(full_path, media_type="application/pdf", filename=doc.file_name)
+    # inline, not the Starlette default of attachment — the frontend fetches
+    # this as a Blob (app/api/client.ts::apiRequestBlob) and never navigates
+    # the browser to this URL directly, but a correct Content-Disposition
+    # is still the right header to send for a PDF meant to be viewed, not
+    # downloaded (section 5 "safe inline PDF rendering where supported").
+    return FileResponse(full_path, media_type="application/pdf", filename=doc.file_name, content_disposition_type="inline")
 
 
 @router.post("/query", response_model=DocumentQueryResponse)

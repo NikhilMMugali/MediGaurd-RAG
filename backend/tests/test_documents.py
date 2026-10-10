@@ -234,6 +234,28 @@ def test_document_file_served_to_uploader(client, db_session, seeded_doctor, iso
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/pdf"
     assert response.content == b"%PDF-1.4 fake pdf bytes for testing"
+    # Must render inline in the viewer, not force a browser download — the
+    # Starlette default for FileResponse(filename=...) is "attachment".
+    assert response.headers["content-disposition"].startswith("inline")
+
+
+def test_document_file_returns_the_exact_requested_document_not_another(client, db_session, seeded_doctor, isolated_upload_dir):
+    """Two different documents the same user can see must never cross-wire
+    — requesting doc A's id must never return doc B's bytes."""
+    doc_a = _seed_document(db_session, uploaded_by=seeded_doctor.id, patient_id=None)
+    doc_a.storage_path = _write_fake_pdf(isolated_upload_dir, doc_a.id)
+    doc_b = _seed_document(db_session, uploaded_by=seeded_doctor.id, patient_id=None)
+    (isolated_upload_dir / f"{doc_b.id}.pdf").write_bytes(b"%PDF-1.4 completely different bytes for doc B")
+    doc_b.storage_path = f"{doc_b.id}.pdf"
+    db_session.commit()
+    token = _login(client, "doctor01", "secret123", "DOCTOR")
+
+    resp_a = client.get(f"/api/documents/{doc_a.id}/file", headers={"Authorization": f"Bearer {token}"})
+    resp_b = client.get(f"/api/documents/{doc_b.id}/file", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp_a.content == b"%PDF-1.4 fake pdf bytes for testing"
+    assert resp_b.content == b"%PDF-1.4 completely different bytes for doc B"
+    assert resp_a.content != resp_b.content
 
 
 def test_document_file_served_to_assigned_clinician_even_if_uploaded_by_someone_else(

@@ -141,7 +141,12 @@ export default function PdfViewerPanel({ citation, onClose }: PdfViewerPanelProp
         {error && <p className="p-4 text-sm text-destructive">{error}</p>}
         {!error && !blobUrl && <LoadingState label="Loading document..." />}
         {!error && blobUrl && (
-          <Document file={blobUrl} onLoadSuccess={({ numPages: n }) => setNumPages(n)} loading={<LoadingState label="Rendering PDF..." />}>
+          <Document
+            file={blobUrl}
+            onLoadSuccess={({ numPages: n }) => setNumPages(n)}
+            onLoadError={() => setError("This file could not be opened as a PDF.")}
+            loading={<LoadingState label="Rendering PDF..." />}
+          >
             <Page pageNumber={pageNumber} scale={scale} customTextRenderer={textRenderer} />
           </Document>
         )}

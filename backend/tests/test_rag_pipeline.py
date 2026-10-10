@@ -46,6 +46,8 @@ def patched_rag_dependencies(monkeypatch, tmp_path):
     monkeypatch.setattr("app.rag.pipeline.get_embedding_provider", lambda: embedder)
     monkeypatch.setattr("app.rag.pipeline.get_vector_store", lambda: store)
     monkeypatch.setattr("app.rag.pipeline.get_llm_provider", lambda sources: CapturingLLM())
+    captured_context["store"] = store
+    captured_context["embedder"] = embedder
     return captured_context
 
 
@@ -93,3 +95,76 @@ def test_doctor_answered_for_assigned_patient(db_session, seeded_doctor, patched
     assert result.status == "ANSWERED"
     assert "Hypertension" in patched_rag_dependencies["text"]
     assert len(result.citations) > 0
+
+
+# ---- Citation integrity (section 3/10: document_id, patient association,
+# and page metadata must survive the API response correctly, and a
+# structured (database) citation must never be confused with a PDF one).
+# The frontend's PDF viewer (ChatMessage.tsx) gates purely on
+# citation.document_id being non-null to decide whether a citation is
+# openable — these tests lock in the backend half of that contract.
+
+
+def test_structured_citation_has_no_document_id_for_synthea_native_fact(db_session, seeded_doctor, patched_rag_dependencies):
+    """A fact answered from the structured fast path, sourced from a
+    Synthea-native SQL row (never an uploaded PDF), must report
+    document_id=None on its citation. If this were ever non-None, the
+    frontend's citation click-handler would treat a pure database fact as
+    openable, opening nothing or — worse — an unrelated document that
+    happens to share that id."""
+    from app.models.hospital import Condition, Patient
+    from app.rag.pipeline import run_query
+
+    patient = Patient(id=new_uuid(), first="Jordan", last="Rivera", display_id="P401")
+    db_session.add(patient)
+    db_session.add(Condition(id=new_uuid(), patient=patient.id, description="Essential hypertension (disorder)"))
+    db_session.add(PatientAssignment(id=new_uuid(), patient_id=patient.id, user_id=seeded_doctor.id, assignment_type="attending"))
+    db_session.commit()
+
+    result = run_query(db_session, seeded_doctor, "What conditions does this patient have?", patient_id=patient.id)
+
+    assert result.status == "ANSWERED"
+    assert "text" not in patched_rag_dependencies  # structured fast path never calls the LLM
+    assert len(result.citations) == 1
+    assert result.citations[0].document_id is None
+    assert result.citations[0].page is None
+
+
+def test_semantic_citation_preserves_document_id_page_and_evidence_text(db_session, seeded_doctor, patched_rag_dependencies):
+    """The inverse case: a semantic (PDF-narrative) citation must carry the
+    real document_id/page/evidence_text through to the API response
+    unchanged — these are exactly the fields the PDF viewer and citation
+    click-handler depend on to open the right document at the right page."""
+    from app.models.documents import KnowledgeRecord
+    from app.models.hospital import Patient
+    from app.rag.pipeline import run_query
+    from app.services.vector_store import VectorStore
+
+    store, embedder = patched_rag_dependencies["store"], patched_rag_dependencies["embedder"]
+    patient = Patient(id=new_uuid(), first="Priya", last="Nair", display_id="P402")
+    db_session.add(patient)
+    db_session.add(PatientAssignment(id=new_uuid(), patient_id=patient.id, user_id=seeded_doctor.id, assignment_type="attending"))
+    record = KnowledgeRecord(
+        id=new_uuid(),
+        patient_id=patient.id,
+        record_type="document",
+        source_type="UPLOADED_PDF",
+        source_document_id="doc-402",
+        source_page=4,
+        source_section="document",
+        sensitivity="clinical",
+        content="25-OH Vitamin D: 22 ng/mL (LOW), reference interval 30-100 ng/mL.",
+    )
+    db_session.add(record)
+    db_session.commit()
+    store.upsert([PointStruct(id=record.id, vector=embedder.embed_text(record.content), payload={})])
+
+    result = run_query(db_session, seeded_doctor, "What was the vitamin D level?", patient_id=patient.id)
+
+    assert result.status == "ANSWERED"
+    assert len(result.citations) == 1
+    citation = result.citations[0]
+    assert citation.document_id == "doc-402"
+    assert citation.page == 4
+    assert citation.evidence_text == record.content
+    assert citation.patient_id == "P402"
