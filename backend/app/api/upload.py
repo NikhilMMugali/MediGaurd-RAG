@@ -528,6 +528,7 @@ def query_document(
                 patient_id=c.patient_id,
                 evidence_text=c.evidence_text,
                 document_id=c.document_id,
+                highlight_text=c.highlight_text,
             )
             for c in result.citations
         ],

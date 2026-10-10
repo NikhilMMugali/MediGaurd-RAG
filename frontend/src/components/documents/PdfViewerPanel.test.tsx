@@ -13,13 +13,20 @@ vi.mock("@/api/documents", () => ({
 // expose exactly the props PdfViewerPanel passes them, which is the
 // property these tests actually verify (correct file/page, not react-pdf's
 // own rendering).
+const { renderControl } = vi.hoisted(() => ({ renderControl: { throwOnRender: false } }));
+
 vi.mock("react-pdf", () => ({
   pdfjs: { GlobalWorkerOptions: {} },
-  Document: ({ file, children }: { file: string; children: React.ReactNode }) => (
-    <div data-testid="pdf-document" data-file={file}>
-      {children}
-    </div>
-  ),
+  Document: ({ file, children }: { file: string; children: React.ReactNode }) => {
+    // react-pdf throws during render on an unparseable PDF or an old
+    // browser missing a newer API — the failure that blanked the whole app.
+    if (renderControl.throwOnRender) throw new Error("Promise.withResolvers is not a function");
+    return (
+      <div data-testid="pdf-document" data-file={file}>
+        {children}
+      </div>
+    );
+  },
   Page: ({ pageNumber }: { pageNumber: number }) => <div data-testid="pdf-page">{pageNumber}</div>,
 }));
 
@@ -37,6 +44,7 @@ function citation(overrides: Partial<Citation> = {}): Citation {
     patient_id: "P105",
     evidence_text: "25-OH Vitamin D: 18 ng/mL",
     document_id: "doc-105",
+    highlight_text: null,
     ...overrides,
   };
 }
@@ -57,6 +65,7 @@ function deferred<T>() {
 // @testing-library/react's own auto-registered unmount cleanup, which also
 // runs in an afterEach and calls this component's cleanup effect.
 beforeEach(() => {
+  renderControl.throwOnRender = false;
   getDocumentFileBlobMock.mockReset();
   URL.createObjectURL = vi.fn(() => "blob:mock");
   URL.revokeObjectURL = vi.fn();
@@ -142,5 +151,48 @@ describe("PdfViewerPanel", () => {
 
     expect(screen.getByTestId("pdf-document")).toBeInTheDocument();
     expect(getDocumentFileBlobMock).toHaveBeenCalledWith("doc-B");
+  });
+
+  it("a render crash inside the PDF library shows a fallback instead of unmounting the app", async () => {
+    getDocumentFileBlobMock.mockResolvedValue(new Blob(["%PDF"]));
+    renderControl.throwOnRender = true;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(
+      <div data-testid="app-shell">
+        <PdfViewerPanel citation={citation({ evidence_text: "Patient: Unknown\nDocument page 3\n\nVitamin D 18 ng/mL" })} onClose={() => {}} />
+      </div>,
+    );
+
+    expect(await screen.findByText(/could not be displayed in the viewer/i)).toBeInTheDocument();
+    expect(screen.getByTestId("app-shell")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open original pdf/i })).toBeInTheDocument();
+    // The cited evidence is still shown even though the PDF couldn't render.
+    expect(screen.getByText("Vitamin D 18 ng/mL")).toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  it("shows the supporting passage, and never the synthetic Patient/Document page header lines", async () => {
+    getDocumentFileBlobMock.mockResolvedValue(new Blob(["%PDF"]));
+    render(
+      <PdfViewerPanel
+        citation={citation({
+          evidence_text: "Patient: Unknown\nDocument page 3\n\n25-OH Vitamin D\n18\nng/mL\nunrelated line",
+          highlight_text: "25-OH Vitamin D\n18\nng/mL",
+        })}
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("pdf-document")).toBeInTheDocument());
+    expect(screen.queryByText(/Patient: Unknown/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Document page 3/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Supporting evidence/i)).toBeInTheDocument();
+  });
+
+  it("renders nothing for a citation with no document_id (database-only source)", () => {
+    const { container } = render(<PdfViewerPanel citation={citation({ document_id: null })} onClose={() => {}} />);
+    expect(container).toBeEmptyDOMElement();
+    expect(getDocumentFileBlobMock).not.toHaveBeenCalled();
   });
 });

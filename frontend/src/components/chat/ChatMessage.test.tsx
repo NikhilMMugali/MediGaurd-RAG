@@ -16,6 +16,7 @@ function pdfCitation(overrides: Partial<Citation> = {}): Citation {
     patient_id: "P105",
     evidence_text: "25-OH Vitamin D: 18 ng/mL",
     document_id: "doc-105",
+    highlight_text: null,
     ...overrides,
   };
 }
@@ -32,6 +33,7 @@ function dbCitation(overrides: Partial<Citation> = {}): Citation {
     patient_id: "P001",
     evidence_text: null,
     document_id: null,
+    highlight_text: null,
     ...overrides,
   };
 }

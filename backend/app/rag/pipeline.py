@@ -30,6 +30,7 @@ from app.models.hospital import Patient
 from app.models.provenance import new_uuid
 from app.models.user import RoleEnum, User
 from app.rag import structured_answers
+from app.rag.highlight import select_highlight
 from app.rag.query_classification import QueryIntent, classify_query
 from app.services.embedding_provider import get_embedding_provider
 from app.services.llm_provider import get_llm_provider
@@ -95,6 +96,12 @@ class Citation:
     # to actually open the cited PDF. None for a Synthea-derived citation
     # (file_name is also None in that case; there is no PDF to open).
     document_id: str | None = None
+    # The exact passage within evidence_text that supports the answer (a
+    # window of real lines from the cited page, chosen by
+    # app.rag.highlight.select_highlight) — what the PDF viewer highlights.
+    # None when no passage matched convincingly; the viewer then shows the
+    # page without claiming a highlight.
+    highlight_text: str | None = None
 
 
 @dataclass
@@ -549,6 +556,11 @@ def run_query(
             patient_id=display_ids.get(s.get("patient_id")),
             evidence_text=s.get("content"),
             document_id=s.get("source_document_id"),
+            highlight_text=(
+                select_highlight(s.get("content"), question, answer)
+                if s.get("source_document_id") and s.get("source_page")
+                else None
+            ),
         )
         for i, s in enumerate(sources)
     ]

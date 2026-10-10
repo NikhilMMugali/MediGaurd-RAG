@@ -31,6 +31,9 @@ class CitationResponse(BaseModel):
     # SourceDocument.id — lets the frontend fetch GET /api/documents/{id}/file
     # to open the cited PDF. None when the citation isn't PDF-backed.
     document_id: str | None = None
+    # The passage on the cited page that supports the answer — what the PDF
+    # viewer highlights (app.rag.highlight). None when nothing matched.
+    highlight_text: str | None = None
 
 
 class RagQueryResponse(BaseModel):

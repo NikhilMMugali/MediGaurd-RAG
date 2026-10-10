@@ -23,6 +23,7 @@ export interface Citation {
   patient_id: string | null;
   evidence_text: string | null;
   document_id: string | null;
+  highlight_text: string | null;
 }
 
 export type RagStatus = "ANSWERED" | "DENIED" | "NO_AUTHORIZED_CONTEXT";

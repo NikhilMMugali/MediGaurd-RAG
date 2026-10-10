@@ -232,7 +232,7 @@ export default function AssistantPanel({ patientId, onClearPatient, onSelectPati
       </div>
 
       {activeCitation && (
-        <div className="hidden w-[420px] shrink-0 md:block">
+        <div className="fixed inset-0 z-50 bg-background md:static md:inset-auto md:z-auto md:w-[460px] md:shrink-0">
           <PdfViewerPanel citation={activeCitation} onClose={() => setActiveCitation(null)} />
         </div>
       )}
