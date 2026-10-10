@@ -9,6 +9,12 @@
 ## Next push (2026-10-09 UI/UX + Document Intelligence + Hospital Insights + PDF retrieval fix)
 - [ ] Commit and push this iteration's changes (sidebar/routing redesign, Document Intelligence, Hospital Insights, the `SourceDocument.patient_id`/OCR-persistence/uploader-assignment fixes, the PDF retrieval root-cause fixes + citation PDF viewer, 18 new tests, doc updates above)
 
+## 2026-10-10 master audit prompt — done this pass vs. not started
+- [x] Phase 5 (query classification robustness) — 7 reproduced real failures, 6 fixed, 1 documented as an intentional bounded gap; new 40-case eval suite; see progress/DECISIONS.md "Query classification robustness pass"
+- [x] Phase 4 (Synthea dataset cleaning) — verified already correct from a prior session, not re-done; validator passes
+- [x] Phase 9 (DB/security) — bounded spot-check only (SQLi, CORS, secret-key handling, patient-FK indexing) — no issues found; not a full audit
+- [ ] Phase 1 (full written repo audit), Phase 2 (systematic dedup/dead-code sweep beyond the one spot-check above), Phase 3 (no destructive dataset work needed), Phase 6 (RAG quality beyond prior sessions' fixes), Phase 7 (PDF robustness beyond prior sessions' fixes), Phase 8 (frontend/UI-UX polish), Phase 9 (performance profiling/load testing), Phase 10 (broader eval suite — PDF ingestion/retrieval/citation/authorization/dataset-integrity beyond query classification) — not attempted this pass; the 14-phase prompt's full scope was treated as multiple future iterations, not one, per the final report's explicit scoping note
+
 ## Frontend — remaining
 - [ ] Admin retrieval-debug panel UI (backend already returns the `debug` block to ADMIN on `/api/rag/query` — just needs an expandable "Retrieval Details" section)
 - [x] Live ingestion status display — `GET /api/documents/{id}/status` + `DocumentProcessingStatus.tsx` on the new Document Intelligence page reads the persisted `ingestion_jobs` state rather than only the upload response; the original small `UploadDialog` on the Patients page still just shows the final result (not revisited — Document Intelligence is the primary upload surface now)

@@ -19,6 +19,7 @@ calling either.
 """
 import re
 from dataclasses import dataclass
+from difflib import get_close_matches
 
 # Observation categories as Synthea itself labels them (see
 # app.models.hospital.Observation.category). "Clinical" here means the
@@ -59,7 +60,10 @@ _IDENTITY_RE = re.compile(
 ## phrasing a user actually types ("What medications...", "his
 ## conditions...", "recent encounters...").
 _RECORD_TYPE_RULES: list[tuple[re.Pattern, list[str], str]] = [
-    (re.compile(r"\b(medication\w*|medicine\w*|drug\w*|prescri\w*|dose\w*|dosage\w*)\b", re.IGNORECASE), ["medication"], "medication"),
+    # "meds" is the single most common informal synonym for "medication(s)"
+    # and shares no prefix with it, so the `\w*` suffix trick doesn't cover
+    # it — added as its own alternative (section 5 "what meds is he taking").
+    (re.compile(r"\b(medication\w*|medicine\w*|drug\w*|prescri\w*|dose\w*|dosage\w*|meds?)\b", re.IGNORECASE), ["medication"], "medication"),
     (re.compile(r"\b(allerg\w*)\b", re.IGNORECASE), ["allergy"], "allergy"),
     (re.compile(r"\b(diagnos\w*|condition\w*)\b", re.IGNORECASE), ["condition"], "condition"),
     (
@@ -90,9 +94,30 @@ _RECORD_TYPE_RULES: list[tuple[re.Pattern, list[str], str]] = [
         "finance_outstanding",
     ),
     (
-        re.compile(r"\b(lab\w*|laboratory|blood test\w*|test result\w*)\b", re.IGNORECASE),
+        # "blood report"/"vitamin D" are the actual phrasings people use for
+        # lab results, not just "lab test" (section 5 "what about his blood
+        # report", "what was the value for vitamin D"). Synthea's own
+        # Observation rows have a real value for these, so the structured
+        # "recent observations" handler can genuinely answer them.
+        re.compile(r"\b(lab\w*|laboratory|blood (test\w*|report\w*|work)|test result\w*|vitamin\w*)\b", re.IGNORECASE),
         ["observation"],
         "observation",
+    ),
+    (
+        # "any flagged values"/"what's abnormal" — kept OFF the structured
+        # fast path deliberately (intent_kind stays "general", not
+        # "observation", so it never qualifies for _STRUCTURED_INTENTS
+        # below): Synthea's Observation rows have no flag/abnormal concept
+        # at all — that information only exists in a PDF's own printed
+        # "NORMAL"/"LOW" text, which only the semantic path over the
+        # document's narrative chunks can actually answer. Routing this to
+        # answer_recent_observations() would silently ignore the real
+        # evidence and risk a wrong or incomplete answer. record_types is
+        # still narrowed to "observation" so retrieval stays scoped even on
+        # the semantic path.
+        re.compile(r"\b(flagged|abnormal\w*|out of range|outside (the )?(reference )?(range|interval))\b", re.IGNORECASE),
+        ["observation"],
+        "general",
     ),
     (
         re.compile(r"\b(vital\w*|blood pressure|heart rate|pulse|temperature|bmi|body mass|height|weight|o2 sat\w*|oxygen saturation)\b", re.IGNORECASE),
@@ -115,6 +140,44 @@ _STRUCTURED_INTENTS = {
     "finance_outstanding",
     "observation",
 }
+
+
+# Last-resort typo tolerance (section 5 "reasonable variations in spelling,
+# typos" — e.g. "wat medicatoin does she take"). Deliberately NOT a general
+# fuzzy-match layer: it only runs when every regex rule above found nothing
+# at all, and only accepts a close match against this small, specific
+# vocabulary (never against patient names or arbitrary free text), so it
+# can't override a real match or introduce a surprising reclassification —
+# it only recovers the single, clear case where one domain word was
+# misspelled and the question would otherwise have fallen through to an
+# unscoped semantic search.
+_TYPO_VOCAB: list[tuple[str, list[str], str]] = [
+    ("medication", ["medication"], "medication"),
+    ("allergy", ["allergy"], "allergy"),
+    ("condition", ["condition"], "condition"),
+    ("diagnosis", ["condition"], "condition"),
+    ("procedure", ["procedure"], "procedure"),
+    ("encounter", ["encounter"], "encounter"),
+    ("observation", ["observation"], "observation"),
+    ("laboratory", ["observation"], "observation"),
+    ("claim", ["claim", "claim_transaction"], "finance_outstanding"),
+    ("insurance", ["payer", "payer_transition"], "finance_payer"),
+]
+_TYPO_VOCAB_WORDS = [w for w, _, _ in _TYPO_VOCAB]
+_WORD_RE = re.compile(r"[A-Za-z]+")
+
+
+def _typo_tolerant_fallback(question: str) -> tuple[str, str, list[str]] | None:
+    for word in _WORD_RE.findall(question.lower()):
+        if len(word) < 5:
+            continue  # too short for a reliable fuzzy match either way
+        match = get_close_matches(word, _TYPO_VOCAB_WORDS, n=1, cutoff=0.8)
+        if match:
+            canonical = match[0]
+            for vocab_word, types, kind in _TYPO_VOCAB:
+                if vocab_word == canonical:
+                    return types[0], kind, list(types)
+    return None
 
 
 @dataclass
@@ -173,6 +236,11 @@ def classify_query(question: str, role_is_clinical: bool) -> QueryIntent:
                     record_types.append(t)
             if kind not in matched_kinds:
                 matched_kinds.append(kind)
+
+    if record_types is None:
+        label, intent_kind, record_types = _typo_tolerant_fallback(question) or (label, intent_kind, record_types)
+        if record_types is not None:
+            matched_kinds.append(intent_kind)
 
     observation_categories: list[str] | None = None
     if record_types == ["observation"]:

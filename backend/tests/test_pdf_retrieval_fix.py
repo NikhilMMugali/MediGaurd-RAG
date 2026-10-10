@@ -263,7 +263,15 @@ def test_known_patient_fast_path_has_no_relevance_floor(db_session, seeded_docto
     monkeypatch.setattr("app.rag.pipeline.get_vector_store", lambda: store)
     monkeypatch.setattr("app.rag.pipeline.get_llm_provider", lambda sources: _StubLLM())
 
-    result = run_query(db_session, seeded_doctor, "Which specific value was flagged outside its interval?", patient_id=patient.id)
+    # Deliberately avoids "flagged"/"abnormal"/"interval"/"lab" etc. — those
+    # now correctly narrow record_types to ["observation"] (a later,
+    # separate classifier improvement — see
+    # tests/test_query_classification_eval.py), which this fixture's
+    # record_type="document" knowledge record wouldn't match, making this
+    # test fail for an unrelated reason. The property under test here is
+    # specifically "no relevance floor on the known-patient path", isolated
+    # from record_type narrowing.
+    result = run_query(db_session, seeded_doctor, "What was the lowest reading recorded on this page?", patient_id=patient.id)
 
     assert result.status == "ANSWERED"
     assert result.retrieved_count == 1
