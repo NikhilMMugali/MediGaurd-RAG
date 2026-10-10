@@ -57,6 +57,16 @@ function groupCitations(citations: Citation[]): GroupedCitation[] {
   return Array.from(groups.values()).map((g) => {
     const kind = g.ids.length > 1 ? `${g.kind}s` : g.kind;
     if (g.fileName) {
+      // An image has no pages: label it as what it is (a "Page 1" would read
+      // like a PDF page) and flag a low-confidence scan up front.
+      if (g.citation.source_type === "OCR_IMAGE") {
+        const lowConfidence = g.citation.ocr_confidence !== null && g.citation.ocr_confidence < 0.85;
+        return {
+          ids: g.ids,
+          label: `${g.fileName} — OCR image${lowConfidence ? " (low OCR confidence)" : ""}`,
+          citation: g.citation,
+        };
+      }
       return { ids: g.ids, label: `${g.fileName}${g.page ? ` — Page ${g.page}` : ""}`, citation: g.citation };
     }
     // "Condition record · P001 · 14 Mar 2026" — patient id included since a

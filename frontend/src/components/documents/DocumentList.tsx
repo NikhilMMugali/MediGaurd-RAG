@@ -1,5 +1,5 @@
 import * as React from "react";
-import { FileText, RefreshCw, Search } from "lucide-react";
+import { FileText, Image as ImageIcon, RefreshCw, Search } from "lucide-react";
 import { listDocuments } from "@/api/documents";
 import { ApiError } from "@/api/client";
 import type { DocumentListItem } from "@/types";
@@ -18,6 +18,10 @@ const STATUS_VARIANT: Record<string, BadgeVariant> = {
   EXTRACTING: "secondary",
   MAPPING: "secondary",
   CHUNKING: "secondary",
+  VALIDATING: "secondary",
+  OCR_PROCESSING: "secondary",
+  IDENTIFYING_PATIENT: "secondary",
+  INDEXING: "secondary",
 };
 
 function formatDate(iso: string): string {
@@ -72,7 +76,7 @@ export default function DocumentList({ selectedId, onSelect, refreshKey }: Docum
       {documents === null && !error && <LoadingState label="Loading documents..." />}
       {error && <ErrorState message={error} onRetry={load} />}
       {documents !== null && !error && filtered.length === 0 && (
-        <EmptyState icon={FileText} title="No documents yet" description="Upload a PDF above to get started." />
+        <EmptyState icon={FileText} title="No documents yet" description="Upload a PDF or an image above to get started." />
       )}
 
       <div className="flex flex-col gap-1.5">
@@ -86,7 +90,14 @@ export default function DocumentList({ selectedId, onSelect, refreshKey }: Docum
             }`}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate font-medium">{doc.file_name}</span>
+              <span className="flex min-w-0 items-center gap-1.5 font-medium">
+                {doc.source_type === "OCR_IMAGE" ? (
+                  <ImageIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="Image (OCR)" />
+                ) : (
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="PDF" />
+                )}
+                <span className="truncate">{doc.file_name}</span>
+              </span>
               <Badge variant={STATUS_VARIANT[doc.status] ?? "muted"} className="shrink-0">
                 {doc.status.replace(/_/g, " ")}
               </Badge>

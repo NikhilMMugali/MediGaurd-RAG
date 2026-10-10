@@ -38,6 +38,19 @@ _SUMMARY_RE = re.compile(
     r"\b(summary|summarize|tell me about|what do you have on|what information do you have|overview|everything (important|you know))\b",
     re.IGNORECASE,
 )
+# A question about an uploaded document/image itself ("what does this image
+# say", "summarize the report", "which image shows that"). Such a question must
+# be answered from the document's own text, not from the structured SQL summary
+# — which reports "0 documented" for a patient whose data exists only in an
+# upload. Plain "report" is deliberately NOT here: "his blood report" is a lab
+# results phrase handled by the observation rule, so "report" only counts when
+# it is "this/the/that/uploaded/attached report".
+_DOCUMENT_REFERENCE_RE = re.compile(
+    r"\b(image|images|picture|pictures|photo|photograph|scan|scanned|screenshot|upload(ed)?|attached|pdf|printout|document|documents)\b"
+    r"|\b(this|that|the|uploaded|attached)\s+report\b",
+    re.IGNORECASE,
+)
+
 # Covers "what is his name", "tell me his age", "how old is the patient",
 # "what is P001's gender" — a bare "<pronoun/possessive> age" without a
 # "what is" prefix is common in natural speech and must still classify as
@@ -116,7 +129,10 @@ _RECORD_TYPE_RULES: list[tuple[re.Pattern, list[str], str]] = [
         # still narrowed to "observation" so retrieval stays scoped even on
         # the semantic path.
         re.compile(r"\b(flagged|abnormal\w*|out of range|outside (the )?(reference )?(range|interval))\b", re.IGNORECASE),
-        ["observation"],
+        # "document" too: the flag/range lives in an uploaded report's own
+        # text (PDF or OCR image), which narrowing to "observation" alone
+        # would hide from retrieval entirely.
+        ["observation", "document"],
         "general",
     ),
     (
@@ -202,7 +218,9 @@ def classify_query(question: str, role_is_clinical: bool) -> QueryIntent:
             route="structured",
         )
 
-    if _SUMMARY_RE.search(question):
+    document_reference = bool(_DOCUMENT_REFERENCE_RE.search(question))
+
+    if not document_reference and _SUMMARY_RE.search(question):
         return QueryIntent(
             label="summary",
             record_types=None,
@@ -241,6 +259,13 @@ def classify_query(question: str, role_is_clinical: bool) -> QueryIntent:
         label, intent_kind, record_types = _typo_tolerant_fallback(question) or (label, intent_kind, record_types)
         if record_types is not None:
             matched_kinds.append(intent_kind)
+
+    if document_reference:
+        # Always semantic (it needs the document's text), and always allowed to
+        # see the document chunks in addition to whatever domain was named.
+        record_types = (record_types or []) + [t for t in ["document"] if t not in (record_types or [])]
+        intent_kind = "general"
+        matched_kinds = []
 
     observation_categories: list[str] | None = None
     if record_types == ["observation"]:

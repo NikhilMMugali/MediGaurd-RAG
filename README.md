@@ -437,7 +437,7 @@ This provides visibility into both the security decision and the information use
 | Hallucination reduction         | Deterministic SQL + grounded semantic RAG                   |
 | Auditability                    | Query audit logs                                            |
 
-> OCR and full image-based multimodal processing are planned future enhancements.
+> **Image OCR upload is implemented** (Document Intelligence → "Upload Image using OCR"): JPG/PNG/WEBP images are read by a local OCR engine and become searchable, citable knowledge through the same secure RAG pipeline as PDFs. Scanned/image-only *PDFs* are still saved for manual review (no PDF-page OCR yet), and medical-image *understanding* (radiology, photos of conditions) is out of scope — OCR only reads printed/handwritten text.
 
 ---
 
@@ -557,6 +557,17 @@ source .venv/bin/activate
 pip install -r backend/requirements.txt
 cp .env.example .env
 ```
+
+### OCR setup (image uploads)
+
+OCR uses **RapidOCR** (PaddleOCR models on ONNX Runtime). It installs entirely through `pip` — the models ship inside the wheel, so there is **no system binary** (no Tesseract) to install, and images are read on your own machine, never sent to a third-party OCR service.
+
+```bash
+pip install -r backend/requirements.txt          # includes rapidocr-onnxruntime, onnxruntime, opencv-python
+python -c "from rapidocr_onnxruntime import RapidOCR; RapidOCR(); print('OCR engine OK')"
+```
+
+If the engine is missing the upload is marked **FAILED** with "The OCR engine is not available on this server" — it is never reported as a success. The first image after a server start takes a few seconds longer (model load); after that an image takes roughly 1–3 seconds. Limits (all in `backend/app/config.py`): 40 megapixels per image, `MAX_UPLOAD_SIZE_MB` file size, and a mean-confidence floor below which an image is sent to review instead of indexed.
 
 ## Database
 

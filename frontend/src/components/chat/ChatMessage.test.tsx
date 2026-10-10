@@ -17,6 +17,7 @@ function pdfCitation(overrides: Partial<Citation> = {}): Citation {
     evidence_text: "25-OH Vitamin D: 18 ng/mL",
     document_id: "doc-105",
     highlight_text: null,
+    ocr_confidence: null,
     ...overrides,
   };
 }
@@ -34,6 +35,7 @@ function dbCitation(overrides: Partial<Citation> = {}): Citation {
     evidence_text: null,
     document_id: null,
     highlight_text: null,
+    ocr_confidence: null,
     ...overrides,
   };
 }
@@ -103,5 +105,23 @@ describe("ChatMessage citation handling", () => {
     expect(screen.getByText("Select a patient")).toBeInTheDocument();
     expect(screen.queryByText(/no authorized information found/i)).not.toBeInTheDocument();
     expect(screen.getByText(/no patient is selected/i)).toBeInTheDocument();
+  });
+
+  it("labels an OCR image citation as an image (never 'Page 1') and flags low OCR confidence", async () => {
+    const onCitationClick = vi.fn();
+    const image = pdfCitation({
+      source_id: "SOURCE_1", source_type: "OCR_IMAGE", file_name: "scan.png", page: null, section: "ocr_image", ocr_confidence: 0.6,
+    });
+    render(<ChatMessage role="assistant" text="answer" citations={[image]} onCitationClick={onCitationClick} />);
+    const button = screen.getByRole("button", { name: /scan\.png — OCR image \(low OCR confidence\)/ });
+    expect(button).not.toHaveTextContent(/Page/);
+    await userEvent.click(button);
+    expect(onCitationClick).toHaveBeenCalledWith(image);
+  });
+
+  it("does not warn about OCR confidence for a confident scan", () => {
+    const image = pdfCitation({ source_type: "OCR_IMAGE", file_name: "scan.png", page: null, ocr_confidence: 0.97 });
+    render(<ChatMessage role="assistant" text="answer" citations={[image]} onCitationClick={() => {}} />);
+    expect(screen.getByRole("button", { name: /scan\.png — OCR image$/ })).toBeInTheDocument();
   });
 });

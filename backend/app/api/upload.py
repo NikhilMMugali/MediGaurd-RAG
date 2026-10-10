@@ -10,6 +10,8 @@ from app.auth.deps import require_roles
 from app.authorization.context import AuthorizationContext, build_authorization_context
 from app.config import get_settings
 from app.db.session import get_db
+from app.ingestion.image_prep import MEDIA_TYPE_BY_EXTENSION
+from app.ingestion.ocr_store import load_ocr
 from app.ingestion.pdf_extractor import PdfExtractionError, extract_pdf
 from app.ingestion.pdf_mapper import (
     _add_knowledge_record,
@@ -382,6 +384,7 @@ def list_documents(
                 patient_id=display_ids.get(d.patient_id),
                 uploaded_by=uploader_names.get(d.uploaded_by),
                 created_at=d.created_at.isoformat(),
+                source_type=d.source_type,
             )
             for d in docs
         ],
@@ -414,7 +417,10 @@ def document_status(
     # keeps the schema minimal and is always accurate even if the document
     # predates this field being tracked at all.
     page_count: int | None = None
-    if doc.storage_path:
+    ocr = load_ocr(doc.id) if doc.source_type == "OCR_IMAGE" else None
+    if doc.source_type == "OCR_IMAGE":
+        page_count = 1  # a single image; there is no page structure to open
+    elif doc.storage_path:
         try:
             import fitz  # PyMuPDF
 
@@ -441,6 +447,9 @@ def document_status(
         records_created=job.records_created if job else 0,
         chunks_created=job.chunks_created if job else 0,
         error_message=job.error_message if job else None,
+        source_type=doc.source_type,
+        ocr_quality=ocr["quality"] if ocr else None,
+        ocr_mean_confidence=ocr["mean_confidence"] if ocr else None,
     )
 
 
@@ -478,7 +487,16 @@ def get_document_file(
     # the browser to this URL directly, but a correct Content-Disposition
     # is still the right header to send for a PDF meant to be viewed, not
     # downloaded (section 5 "safe inline PDF rendering where supported").
-    return FileResponse(full_path, media_type="application/pdf", filename=doc.file_name, content_disposition_type="inline")
+    # PDF by default; an OCR image is served as its own type. nosniff stops a
+    # browser from reinterpreting stored bytes as something executable.
+    media_type = MEDIA_TYPE_BY_EXTENSION.get(full_path.suffix.lower(), "application/pdf")
+    return FileResponse(
+        full_path,
+        media_type=media_type,
+        filename=doc.file_name,
+        content_disposition_type="inline",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.post("/query", response_model=DocumentQueryResponse)
@@ -529,6 +547,7 @@ def query_document(
                 evidence_text=c.evidence_text,
                 document_id=c.document_id,
                 highlight_text=c.highlight_text,
+                ocr_confidence=c.ocr_confidence,
             )
             for c in result.citations
         ],

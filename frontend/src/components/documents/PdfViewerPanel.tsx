@@ -31,9 +31,9 @@ const MAX_FALLBACK_HIGHLIGHT_CHARS = 500;
 // The knowledge generator prepends these lines to each page chunk. They are
 // not printed in the PDF, so they are never shown as evidence and never used
 // for matching.
-const SYNTHETIC_HEADER_LINE = /^(patient:|document page \d+)/i;
+const SYNTHETIC_HEADER_LINE = /^(patient:|document (page|image) \d+)/i;
 
-function stripSyntheticHeader(text: string | null): string | null {
+export function stripSyntheticHeader(text: string | null): string | null {
   if (!text) return null;
   const cleaned = text
     .split("\n")
@@ -58,7 +58,7 @@ interface PdfViewerPanelProps {
   onClose: () => void;
 }
 
-async function openOriginalInNewTab(documentId: string) {
+export async function openOriginalInNewTab(documentId: string) {
   // Opened synchronously so popup blockers allow it, then pointed at the
   // authenticated blob once the file arrives (a plain link couldn't carry
   // the Authorization header).
@@ -73,7 +73,7 @@ async function openOriginalInNewTab(documentId: string) {
   }
 }
 
-function ViewerFrame({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+export function ViewerFrame({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="flex h-full w-full flex-col border-l bg-card">
       <div className="flex items-center justify-between gap-2 border-b px-3 py-2.5">

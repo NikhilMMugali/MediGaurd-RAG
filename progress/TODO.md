@@ -59,3 +59,14 @@
 - [x] Synthea CSV import verified against documented row counts
 - [x] Idempotency verified for importer, knowledge-record generator, and Qdrant indexing (upsert on stable id)
 - [x] 9 focused Phase 3 security tests passing against a real (temp) Qdrant collection, including the "security invariant" test (restricted content never reaches the LLM prompt)
+
+
+## 2026-10-10 OCR image upload — done / not done
+- [x] Local OCR (RapidOCR) for JPG/PNG/WEBP; resumable background pipeline with real stages; identity matching with review states; chunks/embeddings/Qdrant via the existing services; image citations + viewer with real OCR boxes; two-tab Document Intelligence; docs updated (README setup, API spec, DATA_FLOW, SECURITY, DECISIONS)
+- [ ] OCR for scanned/image-only **PDF pages** (still saved as NEEDS_REVIEW)
+- [ ] Structured SQL mapping from OCR text — deliberately off until there is a human review step for it
+- [ ] Re-OCR / "retake" flow for a low-quality image (today: upload a clearer image)
+- [ ] Handwriting, non-English text, multi-image documents, skew correction beyond EXIF — untested/unsupported
+- [ ] Real phone-photo and scanner samples to measure accuracy (only synthetic rendered images were tested)
+- [ ] Cross-browser check (Chromium only so far); OCR of very large concurrent batches
+- [ ] Remove the synthetic dev patient `P107` and its image if a clean demo database is wanted

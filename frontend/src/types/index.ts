@@ -24,6 +24,8 @@ export interface Citation {
   evidence_text: string | null;
   document_id: string | null;
   highlight_text: string | null;
+  // OCR images only: mean OCR confidence (0..1) for a quality caveat.
+  ocr_confidence: number | null;
 }
 
 export type RagStatus = "ANSWERED" | "DENIED" | "NO_AUTHORIZED_CONTEXT" | "NEEDS_CLARIFICATION";
@@ -108,6 +110,7 @@ export interface DocumentListItem {
   patient_id: string | null;
   uploaded_by: string | null;
   created_at: string;
+  source_type: string; // UPLOADED_PDF | OCR_IMAGE
 }
 
 export interface DocumentListResponse {
@@ -126,6 +129,35 @@ export interface DocumentStatusResponse {
   records_created: number;
   chunks_created: number;
   error_message: string | null;
+  source_type: string;
+  ocr_quality: "good" | "fair" | "poor" | null;
+  ocr_mean_confidence: number | null;
+}
+
+export interface ImageUploadResponse {
+  document_id: string;
+  file_name: string;
+  status: string;
+  message: string;
+  patient_id: string | null;
+  duplicate: boolean;
+}
+
+export interface OcrLine {
+  text: string;
+  confidence: number;
+  box: [number, number, number, number]; // x1, y1, x2, y2 in the original image's pixels
+}
+
+export interface OcrResponse {
+  document_id: string;
+  width: number;
+  height: number;
+  mean_confidence: number;
+  quality: "good" | "fair" | "poor";
+  problem: string | null;
+  text: string;
+  lines: OcrLine[];
 }
 
 export interface DocumentQueryResponse {

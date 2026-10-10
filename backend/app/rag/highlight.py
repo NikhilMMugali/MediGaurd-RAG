@@ -18,7 +18,7 @@ _STOPWORDS = {
 _TOKEN_RE = re.compile(r"[a-z]+|[0-9]+(?:\.[0-9]+)?")
 # Header lines the knowledge generator prepends to a page chunk; they are not
 # printed in the PDF itself, so they can never be located on the page.
-_SYNTHETIC_HEADER_RE = re.compile(r"^(patient:|document page \d+)", re.IGNORECASE)
+_SYNTHETIC_HEADER_RE = re.compile(r"^(patient:|document (page|image) \d+)", re.IGNORECASE)
 _MAX_WINDOW_LINES = 6
 _LINE_PENALTY = 0.15
 # Each unmatched token in a window costs this much, so a tight table row

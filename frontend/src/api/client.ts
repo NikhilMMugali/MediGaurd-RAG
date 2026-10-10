@@ -98,3 +98,39 @@ export async function apiRequestBlob(path: string): Promise<Blob> {
   }
   return response.blob();
 }
+
+// Multipart upload with REAL byte-level progress (fetch cannot report upload
+// progress). Same Authorization header and 401/error handling as apiRequest.
+export function apiUploadWithProgress<T>(path: string, formData: FormData, onProgress: (fraction: number) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE_URL}${path}`);
+    const token = getToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded / event.total);
+    };
+    xhr.onerror = () => reject(new ApiError(0, "Could not reach the server. Check your connection and try again."));
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        setToken(null);
+        onUnauthorized?.();
+        reject(new ApiError(401, "Session expired. Please log in again."));
+        return;
+      }
+      let body: unknown = null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // non-JSON error body — keep the generic message below
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as T);
+        return;
+      }
+      const detail = (body as { detail?: unknown } | null)?.detail;
+      reject(new ApiError(xhr.status, typeof detail === "string" ? detail : "Something went wrong while processing your request."));
+    };
+    xhr.send(formData);
+  });
+}

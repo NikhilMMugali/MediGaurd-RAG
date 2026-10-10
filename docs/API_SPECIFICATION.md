@@ -152,3 +152,30 @@ POST /api/admin/debug-retrieval   # shows the authorization filter + what was/wa
 ## Error format
 
 All validation errors return FastAPI's standard `{"detail": [...]}` or `{"detail": "message"}` shape. No endpoint returns stack traces or secrets in error bodies.
+
+
+## OCR image upload (Document Intelligence → "Upload Image using OCR")
+
+Image endpoints live beside the PDF ones and share the same document authorization (`_document_authorized`): the uploader, an assigned clinician, or an admin. Roles: DOCTOR / NURSE / ADMIN to upload; FINANCE and RECEPTION receive `403`.
+
+### `POST /api/documents/upload-image`
+Multipart: `file` (JPG / JPEG / PNG / WEBP) and optional form field `patient_id` (display id, e.g. `P001`). The server — never the client — decides authorization: a `patient_id` the caller is not assigned to is `403`, an unknown one `404`.
+
+Validation trusts the decoded content, not the extension or declared type: `400` unsupported type or over the size limit; `422` empty/corrupt/unreadable, or more than the pixel cap (decompression-bomb guard, checked before decoding).
+
+Response `200`: `{document_id, file_name, status, message, patient_id, duplicate}`. The response returns as soon as the image is validated and stored (`status: "VALIDATING"`); OCR and indexing continue in the background and are observed through `GET /api/documents/{id}/status`. Stages, in order and each persisted as it begins: `VALIDATING → OCR_PROCESSING → IDENTIFYING_PATIENT → MAPPING → INDEXING → COMPLETED`, or stopping at `NEEDS_REVIEW` / `FAILED`. `COMPLETED` is set only after the chunks were indexed **and read back** from Qdrant.
+
+`NEEDS_REVIEW` means a person must act and **nothing has been indexed**: OCR confidence/text too low (`ocr_quality: "poor"`; re-upload a clearer image), or the patient could not be established safely (ambiguous, a near-miss spelling of an existing patient, a patient the uploader may not access, or an explicitly selected patient whose name contradicts the image). Review messages never reveal the existence or id of a patient the uploader cannot access.
+
+**Duplicates** (same bytes) return `200` with `duplicate: true` and the real state, after verifying the stored file, OCR text, patient link, knowledge records, and the vectors actually present in Qdrant; any missing piece is repaired in place (never a collection rebuild, never duplicate chunks).
+
+### `GET /api/documents/{document_id}/ocr`
+The extracted text with per-line `confidence` and `box` (`[x1,y1,x2,y2]` in the original image's pixels, EXIF orientation applied), plus `quality` (`good|fair|poor`), `mean_confidence`, and `problem`. Authorization-checked like the file itself; available for an image in review. `404` for a PDF.
+
+### `POST /api/documents/{document_id}/confirm-patient`
+Body `{ "patient_id": "P007" }`. Resolves an image in `NEEDS_REVIEW` for an identity reason. The caller must be able to see the document **and** be assigned to the target patient (or be admin); `409` if the image is not awaiting confirmation or its text is unreadable (a patient choice cannot make unreadable text trustworthy). Indexing then runs through the normal pipeline.
+
+### Changed existing endpoints (PDF behaviour unchanged)
+- `GET /api/documents/{id}/file` serves an OCR image with its real media type (`image/jpeg|png|webp`), `Content-Disposition: inline`, and `X-Content-Type-Options: nosniff`.
+- `GET /api/documents/{id}/status` adds `source_type`, `ocr_quality`, `ocr_mean_confidence`; `GET /api/documents` adds `source_type` (`UPLOADED_PDF` | `OCR_IMAGE`).
+- RAG citations add `source_type: "OCR_IMAGE"` (with `page: null` — an image has no pages), `highlight_text` (the supporting lines), and `ocr_confidence`.

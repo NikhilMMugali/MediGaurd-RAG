@@ -127,3 +127,15 @@ User question → query normalization → AuthorizationContext (from Postgres)
 ```
 
 See [RAG_DESIGN.md](RAG_DESIGN.md) for the filter construction and grounding rules in detail.
+
+
+## OCR image pipeline (image uploads)
+
+`POST /api/documents/upload-image` → authenticate + role check → validate content (type, size, pixel cap) → store the original bytes (`data/uploads/<id>.<ext>`) → **background**: preprocess → OCR → quality gate → identify patient → create chunks → embed → index → read back from Qdrant → `COMPLETED`.
+
+- **Preprocessing is deliberately conservative** (`app/ingestion/image_prep.py`): EXIF orientation, a size clamp, grayscale, a mild contrast stretch. No binarising, denoising, sharpening or deskew — those erase decimal points, units, thin range dashes and faint handwriting. Images under ~2000px on their long side are upscaled for OCR only: measured on a rendered lab report, native 1100px made the engine drop word spaces ("Patient Name:MeeraKrishnan", "Vitamin D18", "30- 100") while ≥2× returned the text exactly. Boxes are mapped back to original-image pixels.
+- **Persistence**: original image + `<id>.ocr.json` (lines, confidences, boxes, quality) beside it, so a retry resumes from the stored text instead of re-running OCR, and the viewer can draw real regions.
+- **Identity** reuses the PDF extractor (`extract_patient_document_data`) and the `Patient` model. Exact name/ID match to a patient the uploader may access → linked; a plausible new full name → new patient (uploader becomes its only attending, as for PDFs); everything else → `NEEDS_REVIEW` with nothing indexed. A near-miss name never creates a duplicate patient.
+- **Chunks** are ordinary `knowledge_records` (`record_type="document"`, `source_type="OCR_IMAGE"`, `source_section="ocr_image"`) split at line boundaries into ~900 characters so MiniLM embeds all of each chunk. **No structured SQL rows are created from OCR text**: a misread character there would become a "verified" fact in the deterministic answer path. OCR facts are answered through semantic retrieval, with citations.
+- **Retrieval**: questions that refer to the upload ("this image", "the report", "uploaded") route to document text; for a patient who has upload text, the *observation* and *summary* intents skip the SQL-only fast path (which would answer "0 documented" or list unrelated vitals) and use semantic search over both sources. Citations list only sources the answer actually cites.
+- **Not implemented**: OCR of scanned PDF pages (still `NEEDS_REVIEW`), handwriting-specific models, multi-image documents, rotation beyond EXIF, and medical image understanding.

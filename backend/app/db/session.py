@@ -21,3 +21,10 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+def get_session_factory():
+    """Dependency returning a factory for NEW sessions. Background work (OCR
+    processing) outlives the request's own session, so it must open its own;
+    taking the factory as a dependency lets tests point it at the test DB."""
+    return SessionLocal

@@ -34,6 +34,7 @@ def rag_query(
                 evidence_text=c.evidence_text,
                 document_id=c.document_id,
                 highlight_text=c.highlight_text,
+                ocr_confidence=c.ocr_confidence,
             )
             for c in result.citations
         ],

@@ -30,6 +30,7 @@ from app.models.hospital import Patient
 from app.models.provenance import new_uuid
 from app.models.user import RoleEnum, User
 from app.rag import structured_answers
+from app.ingestion.ocr_store import load_ocr
 from app.rag.highlight import select_highlight
 from app.rag.query_classification import QueryIntent, classify_query
 from app.services.embedding_provider import get_embedding_provider
@@ -102,6 +103,9 @@ class Citation:
     # None when no passage matched convincingly; the viewer then shows the
     # page without claiming a highlight.
     highlight_text: str | None = None
+    # OCR images only: the engine's mean confidence in the text it read
+    # (0..1), so the UI can caveat a citation built on a poor scan.
+    ocr_confidence: float | None = None
 
 
 @dataclass
@@ -406,6 +410,27 @@ def _semantic_retrieve(db: Session, aq: _AuthorizedQuery, question: str, documen
     return RetrievalOutcome(status="OK", sources=sources, debug=debug)
 
 
+# An answer that says the context didn't contain the answer must not be
+# followed by a list of "sources" — they were retrieved, but they didn't
+# support anything.
+_NO_SUPPORT_RE = re.compile(
+    r"(does not|do not|doesn't|don't|did not|didn't)\s+(contain|include|mention|provide|state|specify|say)"
+    r"|not\s+(enough|sufficient)|no\s+(relevant\s+)?information|(cannot|can't|couldn't|could not|unable to)\s+(find|determine|answer)"
+    r"|insufficient",
+    re.IGNORECASE,
+)
+
+
+def _cited_source_numbers(answer: str, source_count: int) -> set[int]:
+    cited = {int(n) for n in _SOURCE_CITATION_RE.findall(answer)}
+    if cited:
+        return {n for n in cited if 1 <= n <= source_count}
+    # No markers at all: the model either refused or ignored the citation
+    # instruction. A refusal gets no sources; otherwise keep them all rather
+    # than silently dropping the evidence for an answer we cannot attribute.
+    return set() if _NO_SUPPORT_RE.search(answer) else set(range(1, source_count + 1))
+
+
 def _validate_citations(answer: str, source_count: int) -> str:
     """Strips any [SOURCE_n] the model cited that wasn't actually in the
     context it was given (section 78 "LLM response validation") — the
@@ -464,6 +489,15 @@ PATIENT_CONTEXT_NEEDED_MESSAGE = (
 )
 
 
+def _has_uploaded_document_text(db: Session, patient_id: str) -> bool:
+    return (
+        db.query(KnowledgeRecord.id)
+        .filter(KnowledgeRecord.patient_id == patient_id, KnowledgeRecord.record_type == "document")
+        .first()
+        is not None
+    )
+
+
 def run_query(
     db: Session, user: User, question: str, patient_id: str | None = None, document_id: str | None = None
 ) -> RagResult:
@@ -501,7 +535,19 @@ def run_query(
     # the semantic path below, same as before.
     if document_id is None and authorized.resolved_patient and intent.route in ("structured", "summary"):
         display_id = _display_id_for(db, authorized.resolved_patient)
-        if intent.route == "summary":
+        # The structured handlers only know the SQL tables. For a patient with
+        # uploaded-document text (PDF or OCR image) two intents would otherwise
+        # answer from SQL and never look at it: a summary ("0 documented" for
+        # a patient whose data is only in an upload) and the observation list
+        # (a "Vitamin D" question answered with unrelated recent vitals). Those
+        # go through the semantic path, which searches both. Other intents keep
+        # their exact, deterministic SQL answer.
+        defer_to_semantic = (intent.route == "summary" or intent.intent_kind == "observation") and _has_uploaded_document_text(
+            db, authorized.resolved_patient
+        )
+        if defer_to_semantic:
+            structured = None
+        elif intent.route == "summary":
             structured = structured_answers.answer_summary(
                 db, authorized.resolved_patient, display_id, authorized.effective_record_types
             )
@@ -552,6 +598,18 @@ def run_query(
         if "document" in authorized.ctx.allowed_record_types and "document" not in authorized.effective_record_types:
             authorized = replace(authorized, effective_record_types=authorized.effective_record_types + ["document"])
 
+    # A document-scoped question ("What is the Vitamin D result?" asked about
+    # one specific upload) is classified by topic (observation), which narrows
+    # retrieval to observation records — excluding the very document chunks
+    # (record_type "document") the question is about. Within one document the
+    # topic must not hide the document's own text.
+    if (
+        document_id is not None
+        and "document" in authorized.ctx.allowed_record_types
+        and "document" not in authorized.effective_record_types
+    ):
+        authorized = replace(authorized, effective_record_types=authorized.effective_record_types + ["document"])
+
     outcome = _semantic_retrieve(db, authorized, question, document_id)
     if outcome.status != "OK":
         reason = outcome.denial_answer or ""
@@ -573,13 +631,20 @@ def run_query(
     patient_internal_ids = {s["patient_id"] for s in sources if s.get("patient_id")}
     display_ids = _display_ids_for_internal_ids(db, patient_internal_ids)
 
+    keep = _cited_source_numbers(answer, len(sources))
+    ocr_confidence_by_doc = {
+        doc_id: (load_ocr(doc_id) or {}).get("mean_confidence")
+        for doc_id in {s["source_document_id"] for s in sources if s.get("source_type") == "OCR_IMAGE" and s.get("source_document_id")}
+    }
+
     citations = [
         Citation(
             source_id=f"SOURCE_{i+1}",
             source_type=s["source_type"],
             record_id=s.get("knowledge_record_id"),
             file_name=file_names.get(s.get("source_document_id")),
-            page=s.get("source_page"),
+            # A single image has no pages — a "page 1" here would only mislead.
+            page=None if s.get("source_type") == "OCR_IMAGE" else s.get("source_page"),
             section=s.get("source_section") or s.get("record_type"),
             date=s.get("record_date"),
             patient_id=display_ids.get(s.get("patient_id")),
@@ -587,11 +652,13 @@ def run_query(
             document_id=s.get("source_document_id"),
             highlight_text=(
                 select_highlight(s.get("content"), question, answer)
-                if s.get("source_document_id") and s.get("source_page")
+                if s.get("source_document_id") and (s.get("source_page") or s.get("source_type") == "OCR_IMAGE")
                 else None
             ),
+            ocr_confidence=ocr_confidence_by_doc.get(s.get("source_document_id")),
         )
         for i, s in enumerate(sources)
+        if (i + 1) in keep
     ]
 
     retrieved_ids = [s["knowledge_record_id"] for s in sources]

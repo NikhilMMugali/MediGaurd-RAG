@@ -34,6 +34,8 @@ class CitationResponse(BaseModel):
     # The passage on the cited page that supports the answer — what the PDF
     # viewer highlights (app.rag.highlight). None when nothing matched.
     highlight_text: str | None = None
+    # OCR images only: mean OCR confidence (0..1) for a quality caveat.
+    ocr_confidence: float | None = None
 
 
 class RagQueryResponse(BaseModel):

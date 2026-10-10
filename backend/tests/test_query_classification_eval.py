@@ -104,22 +104,34 @@ SEMANTIC_CASES = [
 ]
 
 
-def test_summarize_the_report_is_forced_semantic_in_document_qa_regardless_of_classify_query():
-    """"Summarize the report and cite the pages..." matches the generic
-    `_SUMMARY_RE` and classify_query() in isolation correctly returns
-    route="summary" (a reasonable default for Clinical Chat's own "tell me
-    about this patient" case). But when this phrasing is actually typed
-    into Document Intelligence's Q&A panel, app.rag.pipeline.run_query is
-    called with document_id set, and its own routing guard
-    (`if document_id is None and ... intent.route in (...)`) means the
-    generic structured "summary" short-circuit is never taken in that case
-    — it always falls through to the semantic path, which is what can
-    actually cite PDF pages. classify_query doesn't need to special-case
-    this; the pipeline's document_id guard already handles it correctly."""
-    from app.rag.query_classification import classify_query
+def test_questions_about_an_uploaded_document_go_to_its_text_not_the_sql_summary():
+    """"Summarize the report..." used to match the generic summary rule and
+    return route="summary" — the deterministic SQL rollup. In Document
+    Intelligence that was masked by run_query's `document_id is None` guard,
+    but in Clinical Chat (no document_id) it answered "0 documented" for a
+    patient whose data exists only in an uploaded PDF or OCR image. A
+    question that refers to the report/image/PDF itself is now routed to the
+    document text by the classifier (semantic, record type "document"); the
+    pipeline guard remains as defense in depth."""
+    for question in (
+        "Summarize the report and cite the pages supporting each measurement.",
+        "Tell me about this report.",
+        "What does this image say?",
+        "Which image contains this information?",
+        "Summarize the uploaded report.",
+        "Explain the result using only the information in the report.",
+    ):
+        intent = classify_query(question, role_is_clinical=True)
+        assert intent.route == "semantic", question
+        assert "document" in (intent.record_types or []), question
 
-    intent = classify_query("Summarize the report and cite the pages supporting each measurement.", role_is_clinical=True)
-    assert intent.route == "summary"  # correct in isolation — see docstring for why this is still safe
+
+def test_blood_report_still_means_lab_results_not_an_uploaded_document():
+    """Plain "report" is not a document reference — "his blood report" is a
+    lab-results phrase and must keep its structured observation route."""
+    intent = classify_query("What about his blood report?", role_is_clinical=True)
+    assert intent.route == "structured"
+    assert intent.record_types == ["observation"]
 
 
 @pytest.mark.parametrize("question", SEMANTIC_CASES)

@@ -14,6 +14,10 @@ const STATUS_VARIANT: Record<string, BadgeVariant> = {
   EXTRACTING: "secondary",
   MAPPING: "secondary",
   CHUNKING: "secondary",
+  VALIDATING: "secondary",
+  OCR_PROCESSING: "secondary",
+  IDENTIFYING_PATIENT: "secondary",
+  INDEXING: "secondary",
 };
 
 interface DocumentProcessingStatusProps {

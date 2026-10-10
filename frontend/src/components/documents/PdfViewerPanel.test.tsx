@@ -45,6 +45,7 @@ function citation(overrides: Partial<Citation> = {}): Citation {
     evidence_text: "25-OH Vitamin D: 18 ng/mL",
     document_id: "doc-105",
     highlight_text: null,
+    ocr_confidence: null,
     ...overrides,
   };
 }

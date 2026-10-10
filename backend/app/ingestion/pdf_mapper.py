@@ -239,7 +239,9 @@ def extract_patient_document_data(extraction: PdfExtractionResult) -> PatientDoc
     return data
 
 
-def find_or_create_patient(db: Session, info: PatientInfo | None, source_document_id: str) -> tuple[Patient | None, bool]:
+def find_or_create_patient(
+    db: Session, info: PatientInfo | None, source_document_id: str, source_type: str = "UPLOADED_PDF"
+) -> tuple[Patient | None, bool]:
     """Deduplicates on external_patient_id + name; never silently merges on
     name alone. An ambiguous case (same name, different external id) still
     creates a new row — flagging for review is Phase 3+ UI work, not a
@@ -271,7 +273,7 @@ def find_or_create_patient(db: Session, info: PatientInfo | None, source_documen
         first=info.first,
         last=info.last,
         gender=info.gender,
-        source_type="UPLOADED_PDF",
+        source_type=source_type,
         source_document_id=source_document_id,
         display_id=_next_display_id(db),
     )
@@ -283,19 +285,15 @@ def find_or_create_patient(db: Session, info: PatientInfo | None, source_documen
 def _next_display_id(db: Session) -> str:
     """The next free Pxxx — a genuinely new patient (not one of the clean
     dataset's P001..P100) still gets a clean display id rather than
-    showing its raw UUID in the UI (docs/CLEAN_DATASET.md)."""
-    highest = (
-        db.query(Patient.display_id)
-        .filter(Patient.display_id.isnot(None))
-        .order_by(Patient.display_id.desc())
-        .first()
-    )
-    next_n = 1
-    if highest and highest[0]:
-        match = re.match(r"P(\d+)", highest[0])
+    showing its raw UUID in the UI (docs/CLEAN_DATASET.md). Compares the
+    numeric part: ordering the strings ("P999" > "P1000") would hand out an
+    id that already exists once the count passes 999."""
+    highest = 0
+    for (display_id,) in db.query(Patient.display_id).filter(Patient.display_id.isnot(None)).all():
+        match = re.match(r"P(\d+)$", display_id or "")
         if match:
-            next_n = int(match.group(1)) + 1
-    return f"P{next_n:03d}"
+            highest = max(highest, int(match.group(1)))
+    return f"P{highest + 1:03d}"
 
 
 def _add_knowledge_record(
@@ -309,6 +307,7 @@ def _add_knowledge_record(
     source_document_id: str,
     source_page: int | None,
     source_section: str | None,
+    source_type: str = "UPLOADED_PDF",
 ) -> str:
     """Mirrors app.services.knowledge_generator's pattern for Synthea data,
     but for PDF-derived rows so an uploaded document's knowledge is
@@ -321,7 +320,7 @@ def _add_knowledge_record(
             patient_id=patient_id,
             record_type=record_type,
             record_id=record_id,
-            source_type="UPLOADED_PDF",
+            source_type=source_type,
             source_document_id=source_document_id,
             source_page=source_page,
             source_section=source_section,
@@ -398,13 +397,13 @@ def repair_patient_link(
 
 
 def map_to_database(
-    db: Session, data: PatientDocumentData, source_document_id: str
+    db: Session, data: PatientDocumentData, source_document_id: str, source_type: str = "UPLOADED_PDF"
 ) -> tuple[int, list[str], Patient | None, bool]:
     """Inserts every mappable item as a real row in the canonical tables,
     stamped with source_type=UPLOADED_PDF + source_document_id + source_page,
     and a matching knowledge_records row so it's immediately indexable.
     Returns (records_created, new_knowledge_record_ids, patient, patient_created)."""
-    patient, patient_created = find_or_create_patient(db, data.patient, source_document_id)
+    patient, patient_created = find_or_create_patient(db, data.patient, source_document_id, source_type)
     patient_id = patient.id if patient else None
     created = 0
     knowledge_record_ids: list[str] = []
@@ -416,7 +415,7 @@ def map_to_database(
                 id=record_id,
                 patient=patient_id,
                 description=item.description,
-                source_type="UPLOADED_PDF",
+                source_type=source_type,
                 source_document_id=source_document_id,
             )
         )
@@ -431,6 +430,7 @@ def map_to_database(
                 source_document_id=source_document_id,
                 source_page=item.source_page,
                 source_section=item.source_section,
+                source_type=source_type,
             )
         )
         created += 1
@@ -442,7 +442,7 @@ def map_to_database(
                 id=record_id,
                 patient=patient_id,
                 description=item.description,
-                source_type="UPLOADED_PDF",
+                source_type=source_type,
                 source_document_id=source_document_id,
             )
         )
@@ -457,6 +457,7 @@ def map_to_database(
                 source_document_id=source_document_id,
                 source_page=item.source_page,
                 source_section=item.source_section,
+                source_type=source_type,
             )
         )
         created += 1
@@ -469,7 +470,7 @@ def map_to_database(
                 patient=patient_id,
                 description=item.description,
                 severity1=item.severity,
-                source_type="UPLOADED_PDF",
+                source_type=source_type,
                 source_document_id=source_document_id,
             )
         )
@@ -484,6 +485,7 @@ def map_to_database(
                 source_document_id=source_document_id,
                 source_page=item.source_page,
                 source_section=item.source_section,
+                source_type=source_type,
             )
         )
         created += 1
@@ -495,7 +497,7 @@ def map_to_database(
                 id=record_id,
                 patient=patient_id,
                 description=item.description,
-                source_type="UPLOADED_PDF",
+                source_type=source_type,
                 source_document_id=source_document_id,
             )
         )
@@ -510,6 +512,7 @@ def map_to_database(
                 source_document_id=source_document_id,
                 source_page=item.source_page,
                 source_section=item.source_section,
+                source_type=source_type,
             )
         )
         created += 1
@@ -521,7 +524,7 @@ def map_to_database(
                 id=record_id,
                 patient=patient_id,
                 description=item.description,
-                source_type="UPLOADED_PDF",
+                source_type=source_type,
                 source_document_id=source_document_id,
             )
         )
@@ -536,6 +539,7 @@ def map_to_database(
                 source_document_id=source_document_id,
                 source_page=item.source_page,
                 source_section=item.source_section,
+                source_type=source_type,
             )
         )
         created += 1
@@ -548,7 +552,7 @@ def map_to_database(
                 patientid=patient_id,
                 outstandingp=item.outstanding,
                 statusp=item.status,
-                source_type="UPLOADED_PDF",
+                source_type=source_type,
                 source_document_id=source_document_id,
             )
         )
@@ -563,6 +567,7 @@ def map_to_database(
                 source_document_id=source_document_id,
                 source_page=item.source_page,
                 source_section=item.source_section,
+                source_type=source_type,
             )
         )
         created += 1
@@ -579,6 +584,7 @@ def map_to_database(
     # indexed, so the upload response can honestly report "0 records
     # created, N chunks indexed" for a document like this.
     display_ref = patient.display_id if patient and patient.display_id else (patient_id or "Unknown")
+    unit = "image" if source_type == "OCR_IMAGE" else "page"
     for section in data.narrative_sections:
         knowledge_record_ids.append(
             _add_knowledge_record(
@@ -587,10 +593,11 @@ def map_to_database(
                 record_type="document",
                 record_id=None,  # no canonical table row backs a raw narrative page chunk
                 sensitivity="clinical",
-                content=f"Patient: {display_ref}\nDocument page {section.source_page}\n\n{section.content}",
+                content=f"Patient: {display_ref}\nDocument {unit} {section.source_page}\n\n{section.content}",
                 source_document_id=source_document_id,
                 source_page=section.source_page,
-                source_section="document",
+                source_section="ocr_image" if source_type == "OCR_IMAGE" else "document",
+                source_type=source_type,
             )
         )
 

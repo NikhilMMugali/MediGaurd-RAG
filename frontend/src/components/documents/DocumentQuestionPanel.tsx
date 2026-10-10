@@ -18,6 +18,8 @@ interface Message {
 interface DocumentQuestionPanelProps {
   documentId: string | null;
   documentName: string | null;
+  isImage?: boolean;
+  onCitationClick?: (citation: Citation) => void;
 }
 
 const EXAMPLE_PROMPTS = [
@@ -27,7 +29,14 @@ const EXAMPLE_PROMPTS = [
   "When was this report created?",
 ];
 
-export default function DocumentQuestionPanel({ documentId, documentName }: DocumentQuestionPanelProps) {
+const IMAGE_EXAMPLE_PROMPTS = [
+  "What does this image say?",
+  "Summarize the uploaded report.",
+  "Which values are flagged outside the printed reference range?",
+  "What is the patient's hemoglobin result?",
+];
+
+export default function DocumentQuestionPanel({ documentId, documentName, isImage = false, onCitationClick }: DocumentQuestionPanelProps) {
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [input, setInput] = React.useState("");
   const [isLoading, setIsLoading] = React.useState(false);
@@ -82,7 +91,7 @@ export default function DocumentQuestionPanel({ documentId, documentName }: Docu
           <div className="flex flex-col gap-2">
             <p className="text-sm text-muted-foreground">Ask anything about this document.</p>
             <div className="flex flex-wrap gap-2">
-              {EXAMPLE_PROMPTS.map((p) => (
+              {(isImage ? IMAGE_EXAMPLE_PROMPTS : EXAMPLE_PROMPTS).map((p) => (
                 <Button key={p} variant="outline" size="sm" onClick={() => send(p)}>
                   {p}
                 </Button>
@@ -93,7 +102,14 @@ export default function DocumentQuestionPanel({ documentId, documentName }: Docu
 
         <div className="flex flex-col gap-4">
           {messages.map((m, i) => (
-            <ChatMessage key={i} role={m.role} text={m.text} status={m.status} citations={m.citations} />
+            <ChatMessage
+              key={i}
+              role={m.role}
+              text={m.text}
+              status={m.status}
+              citations={m.citations}
+              onCitationClick={onCitationClick}
+            />
           ))}
           {isLoading && (
             <p className="flex items-center gap-1.5 text-sm text-muted-foreground">

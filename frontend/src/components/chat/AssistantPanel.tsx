@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import ChatMessage from "@/components/chat/ChatMessage";
-import PdfViewerPanel from "@/components/documents/PdfViewerPanel";
+import SourceViewerPanel from "@/components/documents/SourceViewerPanel";
 
 interface Message {
   role: "user" | "assistant";
@@ -233,7 +233,7 @@ export default function AssistantPanel({ patientId, onClearPatient, onSelectPati
 
       {activeCitation && (
         <div className="fixed inset-0 z-50 bg-background md:static md:inset-auto md:z-auto md:w-[460px] md:shrink-0">
-          <PdfViewerPanel citation={activeCitation} onClose={() => setActiveCitation(null)} />
+          <SourceViewerPanel citation={activeCitation} onClose={() => setActiveCitation(null)} />
         </div>
       )}
     </div>

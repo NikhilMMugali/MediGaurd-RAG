@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth.security import hash_password
-from app.db.session import Base, get_db
+from app.db.session import Base, get_db, get_session_factory
 from app.main import app
 from app.models.user import RoleEnum, User
 
@@ -34,6 +34,8 @@ def client(db_session):
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+    # Background OCR processing opens its own session; point it at the test DB.
+    app.dependency_overrides[get_session_factory] = lambda: TestSessionLocal
     yield TestClient(app)
     app.dependency_overrides.clear()
 

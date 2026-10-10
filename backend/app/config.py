@@ -56,6 +56,18 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 20
     upload_dir: str = "./data/uploads"
 
+    # OCR image upload (app.ingestion.image_pipeline). The pixel cap is a
+    # decompression-bomb guard: a tiny, highly compressed file can declare
+    # billions of pixels and exhaust memory on decode. The side cap bounds
+    # CPU time per image — larger images are downscaled for OCR only (the
+    # stored original is untouched and box coordinates are mapped back).
+    ocr_max_image_pixels: int = 40_000_000
+    ocr_max_side_px: int = 2600
+    # Below either threshold the result is "needs review", never "ready":
+    # a confident-looking answer built on garbled text is worse than none.
+    ocr_min_mean_confidence: float = 0.55
+    ocr_min_text_chars: int = 15
+
     # The app imports from the clean, deterministic 100-patient dataset
     # (docs/CLEAN_DATASET.md), not the raw Synthea export directly.
     synthea_csv_dir: str = "./data/clean"
