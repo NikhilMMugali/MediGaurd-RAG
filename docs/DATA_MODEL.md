@@ -1,4 +1,4 @@
-# MediGaurd RAG — Data Model
+# MediGuard RAG — Data Model
 
 > **Implementation status (Phase 2, 2026-10-08):** all three table groups below are implemented as SQLAlchemy models (`backend/app/models/`) and created via the initial Alembic migration. Synthea import and knowledge-record generation are verified against SQLite locally (see progress/DECISIONS.md for why — PostgreSQL itself is not yet running on the dev machine); the schema has no Postgres-specific types, so this is a configuration swap, not a rewrite, once Postgres is available.
 

@@ -1,4 +1,4 @@
-"""Build the deterministic, demo-safe MediGaurd dataset from the raw
+"""Build the deterministic, demo-safe MediGuard dataset from the raw
 Synthea export (docs/CLEAN_DATASET.md).
 
     data/raw/synthea_original/*.csv  -->  data/clean/*.csv

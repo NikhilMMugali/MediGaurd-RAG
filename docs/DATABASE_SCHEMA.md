@@ -1,4 +1,4 @@
-# MediGaurd RAG — Database Schema
+# MediGuard RAG — Database Schema
 
 ## Source: Synthea CSV inventory (verified)
 

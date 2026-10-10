@@ -1,4 +1,4 @@
-# MediGaurd RAG — System Architecture
+# MediGuard RAG — System Architecture
 
 ## High-level component diagram
 

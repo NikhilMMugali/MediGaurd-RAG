@@ -1,4 +1,4 @@
-# MediGaurd RAG — Data Flow
+# MediGuard RAG — Data Flow
 
 > **Implementation status (2026-10-09):** all 14 steps below are implemented end-to-end in a single upload request (`backend/app/api/upload.py`, `backend/app/ingestion/pdf_mapper.py`, `backend/app/rag/indexing.py`) — a successfully-mapped PDF is queryable immediately, no separate script run needed. Step 7's "structured info extraction" is a rule-based "Label: Value" line parser, not an LLM call — see progress/DECISIONS.md.
 

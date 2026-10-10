@@ -1,12 +1,13 @@
 ````markdown
-# 🏥 MediGaurd RAG
+# 🏥 MediGuard RAG
 
 ### Secure, Role-Aware Hospital Intelligence Assistant with Hybrid RAG
 
-MediGaurd RAG is a secure hospital intelligence assistant built for the **Code Carnival Hackathon**. It combines a cleaned synthetic hospital database derived from **Synthea** with live PDF uploads into one unified, role-aware, citation-grounded RAG system.
+MediGuard RAG is a secure hospital intelligence assistant built for the **Code Carnival Hackathon**. It combines a cleaned synthetic hospital database derived from **Synthea** with live PDF uploads into one unified, role-aware, citation-grounded RAG system.
 
 Team: Nikhil Mugali (Lead) · Prince Naliyapara · Titli Rajdev · Nanditi Joshi  
 Repository: https://github.com/NikhilMMugali/MediGaurd-RAG.git
+*(The project's name is **MediGuard RAG**. The GitHub repository slug, the local database/credential identifiers such as `medigaurd_dev.db`, and the demo password keep their original spelling until the repository is explicitly renamed — they are identifiers, not branding.)*
 
 ---
 
@@ -32,7 +33,7 @@ Answer
 
 This is unsafe because restricted information may already have entered the LLM context.
 
-### MediGaurd
+### MediGuard
 
 ```text
 User Query
@@ -54,13 +55,13 @@ Generate Grounded Answer
 Citations + Audit Log
 ```
 
-> **MediGaurd enforces security before retrieval, not after generation.**
+> **MediGuard enforces security before retrieval, not after generation.**
 
 ---
 
-## 💡 What MediGaurd Solves
+## 💡 What MediGuard Solves
 
-MediGaurd provides a single hospital intelligence assistant while enforcing different access boundaries for different users.
+MediGuard provides a single hospital intelligence assistant while enforcing different access boundaries for different users.
 
 | Role          | Access                                                                                                                  |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
@@ -76,7 +77,7 @@ The backend verifies the stored account role. A frontend-selected role is never 
 
 # 🧠 Main Innovation — Hybrid RAG
 
-MediGaurd does **not** use vector search for every question.
+MediGuard does **not** use vector search for every question.
 
 Instead, a query classifier determines the most appropriate retrieval strategy.
 
@@ -133,7 +134,7 @@ Questions requiring both exact facts and contextual understanding can combine SQ
 
 ### Why Hybrid RAG?
 
-| Traditional Vector RAG                  | MediGaurd Hybrid RAG                           |
+| Traditional Vector RAG                  | MediGuard Hybrid RAG                           |
 | --------------------------------------- | ---------------------------------------------- |
 | Vector search for almost everything     | Retrieval selected by query intent             |
 | Exact facts may be approximate          | Exact facts come directly from SQL             |
@@ -142,7 +143,7 @@ Questions requiring both exact facts and contextual understanding can combine SQ
 | Less transparent                        | Clear retrieval path + citations               |
 | Authorization is harder to reason about | Authorization enforced on every retrieval path |
 
-> **MediGaurd treats retrieval as a decision problem, not just a similarity-search problem.**
+> **MediGuard treats retrieval as a decision problem, not just a similarity-search problem.**
 
 ---
 
@@ -188,7 +189,7 @@ If the doctor asks:
 "What medications does P050 take?"
 ```
 
-MediGaurd does:
+MediGuard does:
 
 ```text
 Question
@@ -210,7 +211,7 @@ The system does **not** retrieve the restricted record and ask the LLM to hide i
 
 # 📄 PDF → Unified Knowledge Pipeline
 
-MediGaurd supports live PDF ingestion.
+MediGuard supports live PDF ingestion.
 
 Uploaded PDFs do not remain isolated documents. They are transformed into the same canonical knowledge system used by the hospital database.
 
@@ -337,7 +338,7 @@ Possible sources include:
 * PDF sections
 * Stored provenance metadata
 
-MediGaurd also validates citations so the model cannot freely invent arbitrary source identifiers.
+MediGuard also validates citations so the model cannot freely invent arbitrary source identifiers.
 
 ---
 
@@ -425,7 +426,7 @@ This provides visibility into both the security decision and the information use
 
 # 🎯 Problem Statement Mapping
 
-| Requirement                     | MediGaurd Implementation                                    |
+| Requirement                     | MediGuard Implementation                                    |
 | ------------------------------- | ----------------------------------------------------------- |
 | Mixed data ingestion            | Structured hospital records + PDF ingestion                 |
 | Unified vector + metadata index | Knowledge records + Qdrant                                  |
@@ -443,7 +444,7 @@ This provides visibility into both the security decision and the information use
 
 # 🧪 Security & Testing
 
-MediGaurd validates both access and denial scenarios:
+MediGuard validates both access and denial scenarios:
 
 ```text
 DOCTOR
@@ -638,7 +639,7 @@ Reranking
 Multi-Hospital / Multi-Tenant Isolation
 ```
 
-Future versions can extend MediGaurd from structured data + text documents toward a complete multimodal hospital intelligence platform.
+Future versions can extend MediGuard from structured data + text documents toward a complete multimodal hospital intelligence platform.
 
 ---
 
@@ -663,7 +664,7 @@ Future versions can extend MediGaurd from structured data + text documents towar
 
 ---
 
-# ⭐ What Makes MediGaurd Different?
+# ⭐ What Makes MediGuard Different?
 
 ### 1. Authorization Before Retrieval
 
@@ -689,7 +690,7 @@ Every query has an authorization decision and retrieval trail.
 
 # 🏆 Final Summary
 
-> **MediGaurd RAG is a secure hospital AI assistant that combines structured database retrieval with semantic RAG while enforcing authorization before retrieval, ensuring sensitive information never reaches the LLM unless the user is authorized to access it.**
+> **MediGuard RAG is a secure hospital AI assistant that combines structured database retrieval with semantic RAG while enforcing authorization before retrieval, ensuring sensitive information never reaches the LLM unless the user is authorized to access it.**
 
 ```
 ```

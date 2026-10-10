@@ -1,4 +1,4 @@
-# MediGaurd RAG — API Specification
+# MediGuard RAG — API Specification
 
 Base path: `/api` (health check is unprefixed at `/health`).
 
@@ -90,7 +90,7 @@ Implemented (Phase 2). Row counts only (conditions/medications/encounters) — n
 ## Health
 
 ### `GET /health`
-Implemented. Returns `{"status": "ok", "service": "MediGaurd RAG backend"}`. No authentication required.
+Implemented. Returns `{"status": "ok", "service": "MediGuard RAG backend"}`. No authentication required.
 
 ## RAG (Phase 3 — implemented)
 

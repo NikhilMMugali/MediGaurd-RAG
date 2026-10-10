@@ -1,4 +1,4 @@
-# MediGaurd RAG — Decisions Log
+# MediGuard RAG — Decisions Log
 
 Record of non-obvious implementation choices, in case a later session needs the "why."
 

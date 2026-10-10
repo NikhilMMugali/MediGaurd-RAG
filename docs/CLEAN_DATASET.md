@@ -1,6 +1,6 @@
-# The MediGaurd clean dataset
+# The MediGuard clean dataset
 
-MediGaurd's demo data is a deterministic, 100-patient subset of the
+MediGuard's demo data is a deterministic, 100-patient subset of the
 standard Synthea sample population, built by
 [`scripts/build_clean_dataset.py`](../scripts/build_clean_dataset.py) and
 checked by

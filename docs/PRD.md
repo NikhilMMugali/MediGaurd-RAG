@@ -1,4 +1,4 @@
-# MediGaurd RAG — Product Requirements Document
+# MediGuard RAG — Product Requirements Document
 
 ## Problem Statement
 
@@ -16,7 +16,7 @@
 
 ## Personas
 
-- **Dr. Example (Doctor, Cardiology)** — logs in each morning, asks MediGaurd about a patient's current conditions and medications before rounds.
+- **Dr. Example (Doctor, Cardiology)** — logs in each morning, asks MediGuard about a patient's current conditions and medications before rounds.
 - **Finance Example (Finance)** — reviews outstanding claim balances, must never see clinical diagnosis detail even if asking about the same patient.
 - **Admin Example (Admin)** — verifies during the hackathon demo that the retrieval filter actually blocks unauthorized chunks, not just the final answer text.
 

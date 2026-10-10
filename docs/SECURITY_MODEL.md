@@ -1,4 +1,4 @@
-# MediGaurd RAG — Security Model (Threat-Model View)
+# MediGuard RAG — Security Model (Threat-Model View)
 
 This document complements [SECURITY.md](SECURITY.md) (which defines the role matrix and policy) with the mechanics of *how* each threat is actually blocked in code.
 

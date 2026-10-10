@@ -1,4 +1,4 @@
-# MediGaurd RAG — Requirements Traceability
+# MediGuard RAG — Requirements Traceability
 
 ## Problem Statement
 

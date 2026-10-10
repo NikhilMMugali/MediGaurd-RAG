@@ -20,7 +20,7 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
-    "You are MediGaurd, a secure hospital information assistant.\n"
+    "You are MediGuard, a secure hospital information assistant.\n"
     "Use only the authorized context supplied to you below. Never use "
     "outside knowledge.\n"
     "Answer the user's actual question directly and concisely — synthesize "

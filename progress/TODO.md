@@ -1,4 +1,4 @@
-# MediGaurd RAG — TODO
+# MediGuard RAG — TODO
 
 ## Immediate
 - [x] Rebuilt on the clean 100-patient dataset (`data/clean/`) — old 108-patient/176,054-record DB and Qdrant collection kept as `.pre_clean_backup` — reindexed from 156,707 knowledge records

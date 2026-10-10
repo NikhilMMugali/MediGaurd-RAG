@@ -39,7 +39,7 @@ describe("Document Intelligence upload sections", () => {
     expect(panel("pdf")).toHaveClass("hidden");
     expect(panel("pdf")).not.toHaveClass("grid");
     expect(screen.getByRole("heading", { name: "Upload Image using OCR" })).toBeInTheDocument();
-    expect(screen.getByText(/MediGaurd extracts the visible text and makes it searchable through the secure AI assistant/)).toBeInTheDocument();
+    expect(screen.getByText(/MediGuard extracts the visible text and makes it searchable through the secure AI assistant/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("tab", { name: "PDF Upload" }));
     expect(panel("pdf")).toHaveClass("grid");

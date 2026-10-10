@@ -135,7 +135,7 @@ export default function AssistantPanel({ patientId, onClearPatient, onSelectPati
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {messages.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
-            <p>{patientId ? "Ask anything you are authorized to access." : "Select a patient or ask MediGaurd a question."}</p>
+            <p>{patientId ? "Ask anything you are authorized to access." : "Select a patient or ask MediGuard a question."}</p>
             {canUpload && (
               <p className="flex items-center gap-1 text-xs">
                 <Paperclip className="h-3 w-3" />
@@ -166,7 +166,7 @@ export default function AssistantPanel({ patientId, onClearPatient, onSelectPati
           {isLoading && (
             <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              MediGaurd is thinking...
+              MediGuard is thinking...
             </p>
           )}
           {isUploading && (

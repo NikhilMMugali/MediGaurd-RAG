@@ -1,4 +1,4 @@
-# MediGaurd RAG — Security Model
+# MediGuard RAG — Security Model
 
 > **Implementation status (2026-10-08):** the retrieval-time filter described below is implemented and tested against a real Qdrant collection — `backend/app/authorization/context.py` (role → allowed record types/sensitivity/patient scope) and `backend/app/authorization/qdrant_filter.py` (the actual Qdrant `Filter`). See `docs/SECURITY_MODEL.md` for the "how it's actually blocked in code" walkthrough and the test files that prove it.
 

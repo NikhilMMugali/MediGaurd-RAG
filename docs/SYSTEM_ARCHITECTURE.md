@@ -1,4 +1,4 @@
-# MediGaurd RAG — System Architecture (Deployment View)
+# MediGuard RAG — System Architecture (Deployment View)
 
 For the component/request-flow view, see [ARCHITECTURE.md](ARCHITECTURE.md). This document covers how the pieces run and talk to each other.
 

@@ -1,4 +1,4 @@
-# MediGaurd RAG — Project Requirements (Acceptance Tests & Guardrails)
+# MediGuard RAG — Project Requirements (Acceptance Tests & Guardrails)
 
 This document holds the acceptance criteria and explicit guardrails from the original build specification, kept separate from [REQUIREMENTS.md](REQUIREMENTS.md)'s requirement-to-implementation mapping so they're easy to check off literally.
 

@@ -129,7 +129,7 @@ export default function DocumentIntelligence() {
           <div className="flex flex-col gap-2">
             <h2 className="text-sm font-semibold">Upload Image using OCR</h2>
             <p className="text-xs text-muted-foreground">
-              Upload an image of a patient report or hospital document. MediGaurd extracts the visible text and makes it searchable through the secure AI assistant.
+              Upload an image of a patient report or hospital document. MediGuard extracts the visible text and makes it searchable through the secure AI assistant.
             </p>
             <ImageUploader onUploaded={handleImageUploaded} resetKey={imageResetKey} />
           </div>

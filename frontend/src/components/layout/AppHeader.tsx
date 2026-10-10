@@ -23,7 +23,7 @@ interface AppHeaderProps {
 export default function AppHeader({ onMenuClick }: AppHeaderProps) {
   const { user } = useAuth();
   const location = useLocation();
-  const title = TITLES[location.pathname] ?? "MediGaurd";
+  const title = TITLES[location.pathname] ?? "MediGuard";
 
   if (!user) return null;
 

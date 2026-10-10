@@ -24,7 +24,7 @@ export const ROLE_PLACEHOLDER: Record<Role, string> = {
   NURSE: "Ask about your assigned patients...",
   FINANCE: "Ask about claims, payments, or payer information...",
   RECEPTION: "Ask about patients and encounters...",
-  ADMIN: "Ask MediGaurd anything you are authorized to access...",
+  ADMIN: "Ask MediGuard anything you are authorized to access...",
 };
 
 export const ROLE_QUICK_PROMPTS: Record<Role, string[]> = {

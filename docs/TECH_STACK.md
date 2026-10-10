@@ -1,4 +1,4 @@
-# MediGaurd RAG — Tech Stack
+# MediGuard RAG — Tech Stack
 
 ## Backend
 

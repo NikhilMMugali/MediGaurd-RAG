@@ -1,4 +1,4 @@
-# MediGaurd RAG Progress
+# MediGuard RAG Progress
 
 ## Current Phase
 Frontend (core flows implemented) — backend Phases 1-3 complete and verified live against the full real dataset
@@ -101,7 +101,7 @@ Fixed the "answers look like raw database dumps" complaint end to end:
 - [x] Better citation display (grouped by record type + date instead of one row per source; real file names resolved for PDF citations)
 - [x] Patient ID cleanup (dashboard/chip/input placeholder show `Pxxx`, never the raw UUID)
 - [x] Chat spacing (tightened message/source spacing)
-- [x] Loading state ("MediGaurd is thinking..." + spinner, was "...retrieving authorized information...")
+- [x] Loading state ("MediGuard is thinking..." + spinner, was "...retrieving authorized information...")
 - [x] Patient card refinement (no more UUID truncation; status still backend-derived)
 - [ ] Upload UX refinement (not touched this pass — existing dialog/polling behavior kept as-is)
 

@@ -1,4 +1,4 @@
-# MediGaurd RAG — Development Plan
+# MediGuard RAG — Development Plan
 
 Three strict phases. Do not mix phases; a phase is complete only after implementation + tests + manual verification + documentation update + `progress/PROGRESS.md` update + commit (+ push, when requested).
 
